@@ -5,7 +5,6 @@ import io, { Socket } from "socket.io-client";
 import styles from "./page.module.css";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
-const AVAILABLE_MODELS: string[] = ["small", "medium"];
 
 export default function Home() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -19,11 +18,11 @@ export default function Home() {
   const audioChunksRef = useRef<Blob[]>([]);
   const [socketId, setSocketId] = useState<string | null>(null);
 
-  const [activeModel, setActiveModel] = useState<string>(AVAILABLE_MODELS[0] || "small"); // Default to the first available model
+  const [activeModel, setActiveModel] = useState<string | null>(null);
 
   useEffect(() => {
     // Initialize socket connection
-    const newSocket = io(BACKEND_URL + "/streaming", {
+    const newSocket = io(BACKEND_URL, {
       // Changed to connect to the root namespace
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
@@ -34,26 +33,15 @@ export default function Home() {
       console.log("Socket connected:", newSocket.id);
       setSocket(newSocket);
       setSocketId(newSocket.id); // Store the socket ID
-
-      // setup the configuration for real-time transcription
-      newSocket.emit("configuration", {
-        sid: newSocket.id, // Include session ID for backend routing
-        target_model_path: activeModel, // Specify the model to use
-      });
     });
 
-    // Add handler for real-time transcription events
-    newSocket.on("real_time_stt_response", (data) => {
-      console.log("Received real-time transcription:", data);
+    newSocket.on("connect_response", (data) => {
+      console.log("Connection response:", data);
+    });
 
-      // Check if we have a new transcription segment
-      if (data.new_segment && data.segment_transcript) {
-        setRealTimeTranscription(data.segment_transcript);
-        console.log("Updated transcription:", data.segment_transcript);
-      } else if (data.message) {
-        // This is just an acknowledgment message
-        console.log("STT processing message:", data.message);
-      }
+    newSocket.on("new_message", (data: { text: string; timestamp: string; sender: string }) => {
+      console.log("New message from server:", data);
+      setMessages((prevMessages) => [...prevMessages, data]);
     });
 
     newSocket.on("error", (error) => {
@@ -93,7 +81,7 @@ export default function Home() {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
           // Send audio data in chunks
-          const data = {
+          socket.emit("real_time_stt_request", {
             sid: socket.id, // Include session ID for backend routing if needed
             audio_data: event.data,
             real_time: true,
@@ -102,24 +90,20 @@ export default function Home() {
             sample_rate:
               mediaRecorderRef.current?.stream.getAudioTracks()[0].getSettings().sampleRate ||
               48000,
-          };
-          socket.emit("real_time_stt_request", data);
-
-          console.log("Audio Chunk Data: ", data);
-          console.log("Audio chunk sent, size:", event.data.size);
+          });
         }
       };
 
       mediaRecorderRef.current.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        console.log("Recording stopped, final blob size:", audioBlob.size);
+        // const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // console.log("Recording stopped, final blob size:", audioBlob.size);
         stream.getTracks().forEach((track) => track.stop());
         if (socket && socket.connected) {
           socket.emit("stop_recording", { sid: socket.id });
         }
       };
 
-      mediaRecorderRef.current.start(500); // Send data every half second
+      mediaRecorderRef.current.start(1000); // Send data every second
       setIsRecording(true);
       setRealTimeTranscription(""); // Clear previous transcription
       console.log("Recording started");
@@ -177,6 +161,15 @@ export default function Home() {
         {socket && !socket.connected && (
           <p className={styles.statusWarning}>Server disconnected. Attempting to reconnect...</p>
         )}
+
+        <div>
+          Model: 
+          <select
+            className={styles.select}
+            value={socketId || ""}
+            onChange={(e) => }
+          ></select>
+        </div>
 
         <div className={styles.transcriptionSection}>
           <h2>Real-time Transcription:</h2>

@@ -6,7 +6,6 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime
 
 
-from backend.backend import JarvisBrainFactory
 from backend.source.psql_handler import JarvisBrainPSQL
 
 
@@ -111,7 +110,13 @@ if __name__ == "__main__":
 
     try:
         # Connection string
-        instance = JarvisBrainFactory.get_instance()
+        instance = JarvisBrainPSQL(
+            db_name=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT,
+        )
         instance.connect()
 
         # Run comprehensive tests
