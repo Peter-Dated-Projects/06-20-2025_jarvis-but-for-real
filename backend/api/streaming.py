@@ -11,6 +11,7 @@ from backend import (
 
 import os
 import ffmpeg
+import subprocess
 
 from typing import Optional, Union, List, Dict, Any
 
@@ -56,14 +57,18 @@ def process_audio(key: str) -> bool:
     if not is_valid_streaming_key(key):
         return False
 
-    _audio_instance = AudioBuffersInstance.get_instance()
-    audio_chunks = _audio_instance[key][CACHE_AUDIO_DATA]
+    cache_obj = AudioBuffersInstance.get_cache(key)
+    if not cache_obj:
+        print(f"Cache not found for key: {key}")
+        return False
+
+    audio_chunks = cache_obj.get_audio_data()
 
     # Combine the chunks into a single blob
     audio_blob = b"".join(audio_chunks)
 
-    print(f"This is the streaming key: {_audio_instance[key][CACHE_STREAMING_KEY]}")
-    print(_audio_instance[key][CACHE_FILE_PATH])
+    print(f"This is the streaming key: {key}")
+    print(f"File path: {cache_obj.file_path}")
     print(f"Audio buffer length: {len(audio_blob)}")
 
     # check if folder exists
@@ -81,23 +86,14 @@ def process_audio(key: str) -> bool:
             f.write(audio_blob)
         print("Saved audio blob to raw temporary file at:", _temp_file)
 
-        _final_file = _audio_instance[key][CACHE_FILE_PATH]
+        _final_file = cache_obj.file_path
 
         # ffmpeg to save file as proper format
-
         ffmpeg.input(_temp_file).output(
             _final_file, ar=16000, ac=1, acodec="pcm_s16le"
         ).run(quiet=False, overwrite_output=True)
 
         print("Saved audio data to wav file: ", _final_file)
-
-        # create file url
-        base_url = app.config.get(
-            "AUDIO_BASE_URL",
-            f"http://{os.getenv('BACKEND_HOST')}:{os.getenv('BACKEND_PORT')}/static/audio",
-        )
-        file_url = f"{base_url}/{os.path.basename(_final_file)}"
-        _audio_instance[key][CACHE_FILE_URL] = file_url
 
         # delete temp file
         os.remove(_temp_file)
@@ -119,7 +115,7 @@ def process_audio(key: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-@socket_io_instance.on("connect", namespace="/begin_audio_stream")
+@socket_io_instance.on("connect", namespace="/streaming")
 def handle_connect():
     """
     Handle the initial connection for audio streaming.
@@ -142,16 +138,16 @@ def handle_connect():
     print("[CONNECT] Audio Streaming:", request.sid)
     sid = request.sid
 
-    # Initialize the audio instance for this session
-    _audio_instance = AudioBuffersInstance.get_instance()
+    print(f"[CONNECT] Received connection request from: {sid}")
+    print(f"[CONNECT] Request data: {request.data}")
 
     # create data using the object-oriented approach
     result = AudioStreamCache(
-        streaming_key=sid,
+        streaming_id=sid,
         file_path=os.path.join(app.config["AUDIO_CACHE_DIR"], f"{sid}.wav"),
-        audio_data=[],
-        file_url=None,
-        model=request.args.get("model", DEFAULT_MODEL),  # Get model from request args
+        target_model_path=request.args.get(
+            "model", DEFAULT_MODEL
+        ),  # Get model from request args
     )
 
     # add the cache object to the instance
@@ -159,14 +155,83 @@ def handle_connect():
 
     # check if key was actually added
     if not is_valid_streaming_key(sid):
-        emit("error", {"message": "Failed to initialize audio stream"})
+        emit(
+            "error",
+            {"message": "Failed to initialize audio stream"},
+            namespace="/streaming",
+        )
         return
 
     # send a response to client
     emit(
         "connect_response",
         {"message": "Connected to server", "model": DEFAULT_MODEL},
-        namespace="/begin_audio_stream",
+        namespace="/streaming",  # Changed from /begin_audio_stream to /streaming
+    )
+
+
+@socket_io_instance.on("configuration", namespace="/streaming")
+def handle_configuration(data):
+    """
+    Handle configuration requests for the audio streaming session.
+
+    @param data:
+    {
+        "sid": str,
+        "target_model_path": Optional[str],
+    }
+
+    @response:
+    - "error": If the streaming key is invalid or configuration fails
+    - "response": Confirmation that the configuration was successful
+        - {
+            "message": "Configuration successful",
+            "target_model_path": str,
+        }
+    """
+
+    sid = request.sid
+    print("[CONFIGURATION] Received configuration request from:", sid)
+    print("[CONFIGURATION] Data received:", data)
+
+    # chekc if valid streaming key
+    if not is_valid_streaming_key(sid):
+        emit("error", {"message": "Invalid streaming key"}, namespace="/streaming")
+        return
+
+    # Extract the target model path from the incoming data
+    target_model_path = data.get("target_model_path", DEFAULT_MODEL)
+    if not target_model_path:
+        emit(
+            "error",
+            {"message": "No target model path provided"},
+            namespace="/streaming",
+        )
+        print("[CONFIGURATION] No target model path provided:", data)
+        return
+
+    # Get the cache object for the session
+    _cache = AudioBuffersInstance.get_cache(sid)
+    if not _cache:
+        emit(
+            "error", {"message": "Audio stream not initialized"}, namespace="/streaming"
+        )
+        print("[CONFIGURATION] Audio stream not initialized for session:", sid)
+        return
+
+    # update the target model path in the cache
+    _cache._target_model = target_model_path
+    print(
+        f"[CONFIGURATION] Updated target model path for session {sid}: {_cache._target_model}"
+    )
+    # emit a response to the client
+    emit(
+        "configuration_response",
+        {
+            "message": "Configuration successful",
+            "target_model_path": _cache._target_model,
+        },
+        namespace="/streaming",
     )
 
 
@@ -202,9 +267,13 @@ def handle_real_time_stt(data):
     """
     sid = request.sid
 
+    print()
+    print("[REAL-TIME STT] Received real-time STT request from:", sid)
+    print("[REAL-TIME STT] Data received:", data)
+
     # check if valid streaming key
     if not is_valid_streaming_key(sid):
-        emit("error", {"message": "Invalid streaming key"})
+        emit("error", {"message": "Invalid streaming key"}, namespace="/streaming")
         return
 
     # Extract the audio data from the incoming data
@@ -218,6 +287,7 @@ def handle_real_time_stt(data):
         emit(
             "error",
             {"message": "Invalid audio format, channels, or sample rate provided"},
+            namespace="/streaming",
         )
         print(
             "[REAL-TIME STT] Invalid audio format, channels, or sample rate provided:",
@@ -225,12 +295,14 @@ def handle_real_time_stt(data):
         )
         return
     if not audio_data:
-        emit("error", {"message": "No audio data provided"})
+        emit("error", {"message": "No audio data provided"}, namespace="/streaming")
         return
 
     _cache = AudioBuffersInstance.get_cache(sid)
     if not _cache:
-        emit("error", {"message": "Audio stream not initialized"})
+        emit(
+            "error", {"message": "Audio stream not initialized"}, namespace="/streaming"
+        )
         return
 
     _dataformat = AudioConfig(
@@ -252,13 +324,13 @@ def handle_real_time_stt(data):
                 "desired": DESIRED_AUDIO_CONFIG,
                 "actual": _dataformat,
             },
+            namespace="/streaming",
         )
 
     # append received audio to a buffer + handle if real time request
     _cache.add_audio_chunk(audio_data)
 
     if is_real_time:
-
         # TODO - call the whispercore code
         print("[REAL-TIME STT] Received real-time audio data for processing.")
         if not WhisperCoreSingleModel.get_instance().has_model(_cache._target_model):
@@ -284,13 +356,6 @@ def handle_real_time_stt(data):
         }
         emit("real_time_stt_response", response, namespace="/streaming")
 
-    # Optionally, send back a response
-    emit(
-        "real_time_stt_response",
-        {"message": "Received audio data for STT"},
-        namespace="/streaming",
-    )
-
 
 @socket_io_instance.on("stop_recording", namespace="/streaming")
 def handle_stop_recording():
@@ -298,29 +363,28 @@ def handle_stop_recording():
 
     # check if valid streaming key
     if not is_valid_streaming_key(sid):
-        emit("error", {"message": "Invalid streaming key"})
+        emit("error", {"message": "Invalid streaming key"}, namespace="/streaming")
         return
 
     # return the audio file path
     _cache = AudioBuffersInstance.get_cache(sid)
     if not _cache:
-        emit("error", {"message": "Audio stream not initialized"})
+        emit(
+            "error", {"message": "Audio stream not initialized"}, namespace="/streaming"
+        )
         return
-
-    print("Emitting file path: ", _cache.file_path)
-    file_path = _cache.file_path
 
     # Construct a public URL for the audio file.
     base_url = app.config.get(
         "AUDIO_BASE_URL",
         f"http://{os.getenv('BACKEND_HOST')}:{os.getenv('BACKEND_PORT')}/static/audio",
     )
-    file_url = f"{base_url}/{os.path.basename(file_path)}"
+    file_url = f"{base_url}/{os.path.basename(_cache.file_path)}"
     _cache._file_url = file_url
 
     # process the file first
     if not process_audio(sid):
-        emit("error", {"message": "Failed to process audio"})
+        emit("error", {"message": "Failed to process audio"}, namespace="/streaming")
         return
     print(f"Saved recording for client {sid}")
 
@@ -332,6 +396,7 @@ def handle_stop_recording():
             "message": "Succeessfully stopped recording + generated audio file.",
             "file_url": _cache._file_url,
         },
+        namespace="/streaming",
     )
 
 
@@ -342,7 +407,7 @@ def handle_disconnect():
 
     # check if valid streaming key
     if not is_valid_streaming_key(sid):
-        emit("error", {"message": "Invalid streaming key"})
+        emit("error", {"message": "Invalid streaming key"}, namespace="/streaming")
         return
 
     # Clean up the audio buffer for this session

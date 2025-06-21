@@ -9,6 +9,13 @@ import os
 
 from source.whispercore_handler import WhisperCoreHandler
 
+from flask import Flask
+import flask_cors
+from flask import current_app as app
+
+from dotenv import load_dotenv
+
+from source.psql_handler import JarvisBrainPSQL
 
 # ---------------------------------------------------------------------------- #
 # constants
@@ -105,6 +112,36 @@ class WhisperCoreSingleModel:
         return WhisperCoreSingleModel.__INSTANCE
 
 
+# jarvis brain factory
+class JarvisBrainFactory:
+    __INSTANCE = None
+
+    @staticmethod
+    def get_instance():
+        if not JarvisBrainFactory.__INSTANCE:
+            # Database connection parameters
+            DB_NAME = os.getenv("POSTGRES_DB")
+            DB_USER = os.getenv("POSTGRES_USER")  # Use JARVIS as default
+            DB_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+            DB_HOST = os.getenv("POSTGRES_HOST")
+            DB_PORT = os.getenv("POSTGRES_PORT")
+            if not all([DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT]):
+                raise ValueError("Database connection parameters are not set.")
+
+            # Initialize the PSQL handler
+            JarvisBrainFactory.__INSTANCE = JarvisBrainPSQL(
+                db_name=DB_NAME,
+                db_user=DB_USER,
+                db_password=DB_PASSWORD,
+                db_host=DB_HOST,
+                db_port=DB_PORT,
+            )
+
+            # connect
+            JarvisBrainFactory.__INSTANCE.connect()
+        return JarvisBrainFactory.__INSTANCE
+
+
 # ---------------------------------------------------------------------------- #
 # Data structures
 # ---------------------------------------------------------------------------- #
@@ -120,7 +157,7 @@ class AudioStreamCache:
 
         # target model
         self._target_model = target_model_path
-        self._whispercore_handler = WhisperCoreHandler.get_instance().get_model(
+        self._whispercore_handler = WhisperCoreSingleModel.get_instance().get_model(
             target_model_path
         )
 

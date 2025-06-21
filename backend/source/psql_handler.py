@@ -6,7 +6,7 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime
 
 # Import the Message model and repository
-from backend.models.message import Message, MessageRepository
+from models.message import Message, MessageRepository
 
 
 # ------------------------------------------------------------------ #
@@ -87,31 +87,48 @@ class JarvisBrainPSQL:
             print(f"Error inserting message: {e}")
             raise
 
-    def fetch_all_messages(self, filter: str = None):
+    def fetch_all_messages(
+        self,
+        filters: str = None,
+        sort_by: str = "date",
+        sort_order: str = "DESC",
+        limit: int = None,
+    ):
         """
         Fetch all rows from the 'messages' table using the Message model.
-        If a filter is provided, it will be applied to the query.
 
-        :param filter: Optional filter condition to apply to the query.
+        :param filters: Optional filter conditions to apply to the query (SQL WHERE clause)
+        :param sort_by: Column to sort by, defaults to 'date'
+        :param sort_order: Sort order ('ASC' or 'DESC'), defaults to 'DESC'
+        :param limit: Optional limit on the number of results
         :return: List of rows fetched from the table.
         """
         try:
-            if filter:
-                # For complex filters, we'll need to use a raw SQL approach
-                # This is a simplification that directly executes SQL for filtered queries
-                with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                    select_sql = sql.SQL("SELECT * FROM messages WHERE {}").format(
-                        sql.SQL(filter)
-                    )
-                    cursor.execute(select_sql)
-                    rows = cursor.fetchall()
-                    return rows
-            else:
-                # Use the repository to get all messages
-                messages = self.repository.get_all()
+            # For flexibility with all parameters, use a raw SQL approach
+            with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Start with the base query
+                query = "SELECT * FROM messages"
 
-                # Convert to dict format for compatibility with existing code
-                return [message.to_dict() for message in messages]
+                # Add filters if provided
+                if filters:
+                    query += f" WHERE {filters}"
+
+                # Add sorting
+                if sort_by:
+                    # Sanitize sort_by to prevent SQL injection
+                    sort_by = sql.Identifier(sort_by).as_string(cursor)
+                    # Ensure sort_order is either ASC or DESC
+                    sort_order = "ASC" if sort_order.upper() == "ASC" else "DESC"
+                    query += f" ORDER BY {sort_by} {sort_order}"
+
+                # Add limit if provided
+                if limit is not None and limit > 0:
+                    query += f" LIMIT {limit}"
+
+                cursor.execute(query)
+                rows = cursor.fetchall()
+                return rows
+
         except Exception as e:
             print(f"Error fetching messages: {e}")
             raise
