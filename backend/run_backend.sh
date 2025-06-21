@@ -44,7 +44,7 @@ echo "Creating messages table..."
 psql -d jarvis_brain -c "CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
     date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    message VARCHAR(25565) NOT NULL
+    message VARCHAR(16392) NOT NULL
 );"
 
 # Grant proper permissions to JARVIS user on the messages table

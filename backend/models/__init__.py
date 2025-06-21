@@ -1,3 +1,1 @@
-from . import user
-from . import conversation
-from . import segment
+from . import message

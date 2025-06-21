@@ -5,6 +5,8 @@ from flask import current_app as app
 from backend import (
     SocketIOInstance,
     AudioBuffersInstance,
+    AudioStreamCache,
+    WhisperCoreSingleModel,
     CACHE_STREAMING_KEY,
     CACHE_AUDIO_DATA,
     CACHE_FILE_PATH,
@@ -16,15 +18,24 @@ import ffmpeg
 
 from typing import Optional, Union, List, Dict, Any
 
+from source.whispercore_handler import AudioConfig
+
+from pyaudio import paInt16 as pyaudio_paInt16
+
 
 # --------------------------------------------------------------------------- #
-# blueprint
+# blueprint + constants
 # --------------------------------------------------------------------------- #
 
 streaming_bp = Blueprint("streaming_bp", __name__)
 
+
 socket_io_instance = SocketIOInstance.get_instance()
 
+DESIRED_AUDIO_CONFIG = AudioConfig(
+    sample_rate=16000, channels=1, audio_format=pyaudio_paInt16
+)
+DEFAULT_MODEL = "assets/models/ggml-base.en.bin"
 
 # --------------------------------------------------------------------------- #
 # verification functions
@@ -112,26 +123,177 @@ def process_audio(key: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-@socket_io_instance.on("connect", namespace="/streaming")
+@socket_io_instance.on("connect", namespace="/begin_audio_stream")
 def handle_connect():
-    print("Client connected", request.sid)
+    """
+    Handle the initial connection for audio streaming.
+
+    This function initializes the audio stream for a new client connection.
+    Emits a response to the client indicating successful connection.
+
+    @param request: The Flask request object containing the session ID.
+    {
+        "sid": str,  # The session ID of the client
+        "model": Optional[str],  # The model to use for STT, defaults to DEFAULT_MODEL
+    }
+
+    @response:
+    - "error": If the streaming key is invalid or initialization fails
+    - "response": Confirmation that the client is connected to the server
+
+
+    """
+    print("[CONNECT] Audio Streaming:", request.sid)
     sid = request.sid
 
+    # Initialize the audio instance for this session
     _audio_instance = AudioBuffersInstance.get_instance()
 
-    _audio_instance[sid] = {
-        CACHE_STREAMING_KEY: sid,
-        CACHE_FILE_PATH: os.path.join(app.config["AUDIO_CACHE_DIR"], f"{sid}.wav"),
-        CACHE_AUDIO_DATA: [],
-        CACHE_FILE_URL: None,
+    # create data using the object-oriented approach
+    result = AudioStreamCache(
+        streaming_key=sid,
+        file_path=os.path.join(app.config["AUDIO_CACHE_DIR"], f"{sid}.wav"),
+        audio_data=[],
+        file_url=None,
+        model=request.args.get("model", DEFAULT_MODEL),  # Get model from request args
+    )
+
+    # add the cache object to the instance
+    AudioBuffersInstance.add_cache(sid, result)
+
+    # check if key was actually added
+    if not is_valid_streaming_key(sid):
+        emit("error", {"message": "Failed to initialize audio stream"})
+        return
+
+    # send a response to client
+    emit(
+        "connect_response",
+        {"message": "Connected to server", "model": DEFAULT_MODEL},
+        namespace="/begin_audio_stream",
+    )
+
+
+@socket_io_instance.on("real_time_stt_request", namespace="/streaming")
+def handle_real_time_stt(data):
+    """
+
+    Handle real-time speech-to-text requests.
+
+    @param data:
+    {
+        "sid": str,  # The session ID of the client
+
+        "real_time": bool,  # Indicates if this is a real-time request
+        "audio_data": Union[str, bytes],  # raw audio byte data
+
+        "audio_format": str,  # Format of the audio data (e.g., "wav", "mp3")
+        "channels": int,  # Number of audio channels (e.g., 1 for mono, 2 for stereo)
+        "sample_rate": int,  # Sample rate of the audio data (e.g., 16000, 44100)
     }
+
+    @response:
+    - "error": If the streaming key is invalid or no audio data is provided
+    - "response": Confirmation that audio data was received for STT
+        - {
+            "new_segment": boolean,
+            "segment_start": int,
+            "segment_end": int,
+            "segment_transcript": str,
+        }
+
+
+    """
+    sid = request.sid
 
     # check if valid streaming key
     if not is_valid_streaming_key(sid):
         emit("error", {"message": "Invalid streaming key"})
         return
 
-    emit("response", {"message": "Connected to server"})
+    # Extract the audio data from the incoming data
+    audio_data = data.get("audio_data")
+    is_real_time = data.get("real_time")
+    audio_format = data.get("audio_format")
+    channels = data.get("channels")
+    sample_rate = data.get("sample_rate")
+
+    if not audio_format or not channels or not sample_rate:
+        emit(
+            "error",
+            {"message": "Invalid audio format, channels, or sample rate provided"},
+        )
+        print(
+            "[REAL-TIME STT] Invalid audio format, channels, or sample rate provided:",
+            data,
+        )
+        return
+    if not audio_data:
+        emit("error", {"message": "No audio data provided"})
+        return
+
+    _cache = AudioBuffersInstance.get_cache(sid)
+    if not _cache:
+        emit("error", {"message": "Audio stream not initialized"})
+        return
+
+    _dataformat = AudioConfig(
+        audio_format=audio_format,
+        channels=channels,
+        sample_rate=sample_rate,
+    )
+
+    # Check for errors in audio data format
+    if DESIRED_AUDIO_CONFIG != _dataformat:
+        print(
+            "[REAL-TIME STT] Audio format does not match desired configuration. Must have the following:",
+            DESIRED_AUDIO_CONFIG,
+        )
+        emit(
+            "error",
+            {
+                "message": "Audio format does not match desired configuration. Must have the following: ",
+                "desired": DESIRED_AUDIO_CONFIG,
+                "actual": _dataformat,
+            },
+        )
+
+    # append received audio to a buffer + handle if real time request
+    _cache.add_audio_chunk(audio_data)
+
+    if is_real_time:
+
+        # TODO - call the whispercore code
+        print("[REAL-TIME STT] Received real-time audio data for processing.")
+        if not WhisperCoreSingleModel.get_instance().has_model(_cache._target_model):
+            # load the model
+            print(
+                f"[REAL-TIME STT] Loading model: {_cache._target_model} for real-time processing."
+            )
+            WhisperCoreSingleModel.get_instance().add_model(_cache._target_model)
+        else:
+            print(
+                f"[REAL-TIME STT] Model {_cache._target_model} already loaded for real-time processing."
+            )
+
+        # update the whispercore instance
+        _new_segment = _cache._whispercore_handler.get_whisper_core().update_stream()
+
+        # create response + send it
+        response = {
+            "new_segment": _new_segment,
+            "segment_start": 0,
+            "segment_end": len(_cache.get_audio_data()) - 1,
+            "segment_transcript": "Simulated transcript for real-time audio",
+        }
+        emit("real_time_stt_response", response, namespace="/streaming")
+
+    # Optionally, send back a response
+    emit(
+        "real_time_stt_response",
+        {"message": "Received audio data for STT"},
+        namespace="/streaming",
+    )
 
 
 @socket_io_instance.on("stop_recording", namespace="/streaming")
@@ -143,11 +305,14 @@ def handle_stop_recording():
         emit("error", {"message": "Invalid streaming key"})
         return
 
-    _audio_instance = AudioBuffersInstance.get_instance()
-
     # return the audio file path
-    print("Emitting file path: ", _audio_instance[sid][CACHE_FILE_PATH])
-    file_path = _audio_instance[sid][CACHE_FILE_PATH]
+    _cache = AudioBuffersInstance.get_cache(sid)
+    if not _cache:
+        emit("error", {"message": "Audio stream not initialized"})
+        return
+
+    print("Emitting file path: ", _cache.file_path)
+    file_path = _cache.file_path
 
     # Construct a public URL for the audio file.
     base_url = app.config.get(
@@ -155,7 +320,7 @@ def handle_stop_recording():
         f"http://{os.getenv('BACKEND_HOST')}:{os.getenv('BACKEND_PORT')}/static/audio",
     )
     file_url = f"{base_url}/{os.path.basename(file_path)}"
-    _audio_instance[sid][CACHE_FILE_URL] = file_url
+    _cache._file_url = file_url
 
     # process the file first
     if not process_audio(sid):
@@ -168,8 +333,8 @@ def handle_stop_recording():
         "result_file_path",
         {
             "streaming_id": sid,
-            "message": "Disconnected from server",
-            "file_url": _audio_instance[sid][CACHE_FILE_URL],
+            "message": "Succeessfully stopped recording + generated audio file.",
+            "file_url": _cache._file_url,
         },
     )
 
@@ -184,29 +349,9 @@ def handle_disconnect():
         emit("error", {"message": "Invalid streaming key"})
         return
 
-
-@socket_io_instance.on("audio_chunk", namespace="/streaming")
-def handle_audio_chunk(data):
-    """Handle incoming audio chunk."""
-    sid = request.sid
-    # check if valid streaming id
-    if not sid:
-        emit("error", {"message": "Invalid streaming key"})
-
-    # check if valid streaming key
-    if not is_valid_streaming_key(sid):
-        emit("error", {"message": "Invalid streaming key"}, namespace="/streaming")
-        return
-
-    _chunk = data["chunk"]
-    print("Received chunk: length = ", len(_chunk))
-
-    # Append the received audio data to the buffer
-    _audio_instance = AudioBuffersInstance.get_instance()
-    _audio_instance[sid][CACHE_AUDIO_DATA].append(_chunk)
-
-    # Optionally, send back a response
-    emit("response", {"message": "received chunk"}, namespace="/streaming")
+    # Clean up the audio buffer for this session
+    AudioBuffersInstance.clean_cache(sid)
+    print(f"Cleaned up audio buffer for session {sid}")
 
 
 @streaming_bp.route("/force_stop", methods=["POST"])

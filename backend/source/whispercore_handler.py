@@ -67,6 +67,18 @@ class AudioConfig:
     def get_samples_per_second(self) -> int:
         return self.sample_rate * self.channels  # No bytes multiplier here
 
+    # --------------------------------------------- #
+    # comparison
+
+    def __eq__(self, other: "AudioConfig") -> bool:
+        if not isinstance(other, AudioConfig):
+            return False
+        return (
+            self.sample_rate == other.sample_rate
+            and self.channels == other.channels
+            and self.audio_format == other.audio_format
+        )
+
 
 # Async Microphone
 class AsyncMicrophone(threading.Thread):
@@ -575,7 +587,7 @@ class WhisperCore:
     # ------------------------------------------------------------ #
     # audio processing / transcription functions
 
-    def update_stream(self):
+    def update_stream(self) -> bool:
         """Updates the transcription with new audio data using correct time handling."""
 
         # here's how i'm going to approach this:
@@ -646,6 +658,11 @@ class WhisperCore:
                     self._results_container.append(
                         WhisperSegmentChunk(time.time(), seg)
                     )
+
+                # update audio storage with new results
+                return True
+        # if we reach here, no new results were added
+        return False
 
     def transcribe_audio(self, audio_data: np.array, **kwargs):
         """
@@ -741,6 +758,21 @@ class WhisperCore:
         pass
 
 
+# handler for the entire system
+class WhisperCoreHandler:
+    def __init__(self, model_path: str):
+        self._audio_storage = AudioStorage(AudioConfig(16000, 1, pyaudio.paInt16))
+        self._whisper_core = WhisperCore(model_path, self._audio_storage)
+
+    def get_whisper_core(self) -> WhisperCore:
+        """Get the WhisperCore instance."""
+        return self._whisper_core
+
+    def get_audio_storage(self) -> AudioStorage:
+        """Get the AudioStorage instance."""
+        return self._audio_storage
+
+
 # ------------------------------------------------------------ #
 # main
 # ------------------------------------------------------------ #
@@ -769,12 +801,14 @@ if __name__ == "__main__":
         filename="whispercpp-audio-test.wav",
     )
 
-    audio_storage = AudioStorage(WHISPER_CONFIG)
-    whisper = WhisperCore(
-        "backend/assets/models/ggml-small.en.bin",
-        audio_storage,
-        # redirect_whispercpp_logs_to="stdout",
+    # create handler
+    whisper = WhisperCoreHandler(
+        model_path="models/ggml-small.en.bin"  # Path to your Whisper model
     )
+
+    # Get references to inner components for convenience
+    whisper_core = whisper.get_whisper_core()
+    audio_storage = whisper.get_audio_storage()
 
     # ------------------------------------------------------------ #
     # start mic thread
@@ -786,7 +820,6 @@ if __name__ == "__main__":
     # ------------------------------------------------------------ #
     # start the model
     try:
-
         running = True
         while running:
             start_time = time.time()
@@ -802,17 +835,19 @@ if __name__ == "__main__":
             _audio_size = sum([len(x) for x in _audio_batch])
             _audio_time = _audio_size / mic.get_bytes_per_second()
 
-            # add audio to storage
+            # add audio to storage - use the handler's audio storage
             for blob in _audio_batch:
                 audio_storage.append_audio(blob)
 
-            whisper.update_stream()
+            # Update the whisper core
+            whisper_core.update_stream()
 
             # print stats
             print(f"Audio blob count: {_blob_count}")
             print(f"Audio blob size: {_audio_size} bytes")
             print(f"Audio blob time: {_audio_time:.2f} seconds")
             print()
+
             # print out audio storage stats
             total_duration = audio_storage.get_total_duration_seconds()
             print(f"Audio storage total duration: {total_duration:.2f} seconds")
@@ -829,14 +864,15 @@ if __name__ == "__main__":
 
             print()
 
-            for i, seg in enumerate(whisper._results_container):
+            # Access results through the whisper core
+            for i, seg in enumerate(whisper_core._results_container):
                 print(f"Segment {i}:")
                 print(f"    Text: {seg.segment.text}")
                 print(f"    Start: {seg.segment.t0:.4f} ms")
                 print(f"    End: {seg.segment.t1:.4f} ms")
                 print(f"    Last Edited: {time.time() - seg.timestamp:.4f} seconds")
 
-            print(f"Total segments processed: {len(whisper._results_container)}")
+            print(f"Total segments processed: {len(whisper_core._results_container)}")
 
             print()
 
@@ -861,6 +897,6 @@ if __name__ == "__main__":
         mic.stop()
         mic.join()
         print("Exiting...")
-        # save the data
-        whisper.get_save().save("whispercpp-audio-test.save")
+        # save the data - use get_whisper_core to access the save functionality
+        whisper_core.get_save().save("whispercpp-audio-test.save")
         os._exit(0)
