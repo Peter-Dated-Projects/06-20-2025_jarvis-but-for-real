@@ -182,6 +182,7 @@ if __name__ == "__main__":
     socket_io_instance.run(
         app,
         host=os.getenv("BACKEND_HOST", "localhost"),
-        port=os.getenv("BACKEND_PORT", 5001),
-        debug=os.getenv("DEBUG", True),
+        port=int(os.getenv("BACKEND_PORT", 5001)), # Ensure port is an integer
+        debug=(os.getenv("DEBUG", "True").lower() == "true"), # Ensure debug is a boolean
+        allow_unsafe_werkzeug=True # Add this line
     )

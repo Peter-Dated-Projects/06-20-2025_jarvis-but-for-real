@@ -1,95 +1,210 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState, useRef } from "react";
+import io, { Socket } from "socket.io-client";
 import styles from "./page.module.css";
 
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
+
 export default function Home() {
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [realTimeTranscription, setRealTimeTranscription] = useState("");
+  const [messages, setMessages] = useState<
+    { text: string; timestamp: string; sender: string }[]
+  >([]);
+  const [currentMessage, setCurrentMessage] = useState("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const [socketId, setSocketId] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Initialize socket connection
+    const newSocket = io(BACKEND_URL, { // Changed to connect to the root namespace
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      transports: ["websocket"],
+    });
+
+    newSocket.on("connect", () => {
+      console.log("Socket connected:", newSocket.id);
+      setSocket(newSocket);
+      setSocketId(newSocket.id); // Store the socket ID
+    });
+
+    newSocket.on("connect_response", (data) => {
+      console.log("Connection response:", data);
+    });
+
+    newSocket.on("new_message", (data: { text: string; timestamp: string; sender: string }) => {
+      console.log("New message from server:", data);
+      setMessages((prevMessages) => [...prevMessages, data]);
+    });
+
+    newSocket.on("error", (error) => {
+      console.error("Socket error:", error);
+    });
+
+    newSocket.on("disconnect", (reason) => {
+      console.log("Socket disconnected:", reason);
+      setSocket(null);
+      setSocketId(null);
+      if (isRecording) {
+        // stopRecording(); // Consider if recording should stop automatically
+      }
+    });
+
+    // Cleanup on component unmount
+    return () => {
+      if (newSocket.connected) {
+        newSocket.disconnect();
+      }
+    };
+  }, []); // Empty dependency array ensures this runs only once
+
+  const startRecording = async () => {
+    if (!socket || !socket.connected) {
+      alert("Socket not connected. Please wait.");
+      return;
+    }
+    if (isRecording) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm' }); // Using webm as it's widely supported
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+          // Send audio data in chunks
+          socket.emit("real_time_stt_request", {
+            sid: socket.id, // Include session ID for backend routing if needed
+            audio_data: event.data,
+            real_time: true,
+            audio_format: "webm", // Matches the mimeType
+            channels: 1, // Assuming mono audio
+            sample_rate: mediaRecorderRef.current?.stream.getAudioTracks()[0].getSettings().sampleRate || 48000,
+          });
+        }
+      };
+
+      mediaRecorderRef.current.onstop = () => {
+        // const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // console.log("Recording stopped, final blob size:", audioBlob.size);
+        stream.getTracks().forEach(track => track.stop());
+        if (socket && socket.connected) {
+          socket.emit("stop_recording", { sid: socket.id });
+        }
+      };
+
+      mediaRecorderRef.current.start(1000); // Send data every second
+      setIsRecording(true);
+      setRealTimeTranscription(""); // Clear previous transcription
+      console.log("Recording started");
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      alert("Could not start recording. Please ensure microphone access is allowed.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      console.log("Recording stopped by user");
+    }
+  };
+
+  const handleSendMessage = () => {
+    if (socket && socket.connected && currentMessage.trim() !== "") {
+      const newMessage = {
+        text: currentMessage,
+        timestamp: new Date().toLocaleTimeString(),
+        sender: "User", // Or use socket.id for a unique sender ID
+      };
+      socket.emit("send_message", newMessage); // Emit to the default namespace
+      setMessages((prevMessages) => [...prevMessages, newMessage]); // Optimistically update UI
+      setCurrentMessage("");
+    }
+  };
+
   return (
     <div className={styles.page}>
       <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol>
-          <li>
-            Get started by editing <code>src/app/page.tsx</code>.
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+        <h1 className={styles.title}>Real-time Audio Transcription & Messaging</h1>
 
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        <div className={styles.controls}>
+          <button
+            onClick={startRecording}
+            disabled={isRecording || !socket || !socket.connected}
+            className={styles.button}
           >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+            Start Recording
+          </button>
+          <button
+            onClick={stopRecording}
+            disabled={!isRecording || !socket || !socket.connected}
+            className={styles.button}
+          >
+            Stop Recording
+          </button>
+        </div>
+
+        {isRecording && <p className={styles.status}>Recording...</p>}
+        {!socket && <p className={styles.statusWarning}>Connecting to server...</p>}
+        {socket && !socket.connected && <p className={styles.statusWarning}>Server disconnected. Attempting to reconnect...</p>}
+
+
+        <div className={styles.transcriptionSection}>
+          <h2>Real-time Transcription:</h2>
+          <p className={styles.transcriptionText}>{realTimeTranscription || "Waiting for audio..."}</p>
+        </div>
+
+        <div className={styles.messageSection}>
+          <h2>Messages</h2>
+          <div className={styles.messageInput}>
+            <input
+              type="text"
+              value={currentMessage}
+              onChange={(e) => setCurrentMessage(e.target.value)}
+              placeholder="Type your message"
+              className={styles.input}
+              onKeyPress={(event) => {
+                if (event.key === 'Enter') {
+                  handleSendMessage();
+                }
+              }}
             />
-            Deploy now
-          </a>
-          <a
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.secondary}
-          >
-            Read our docs
-          </a>
+            <button onClick={handleSendMessage} className={styles.button} disabled={!socket || !socket.connected}>
+              Send
+            </button>
+          </div>
+          <table className={styles.messageTable}>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Sender</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {messages.map((msg, index) => (
+                <tr key={index}>
+                  <td>{msg.timestamp}</td>
+                  <td>{msg.sender}</td>
+                  <td>{msg.text}</td>
+                </tr>
+              ))}
+              {messages.length === 0 && (
+                <tr>
+                  <td colSpan={3}>No messages yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </main>
-      <footer className={styles.footer}>
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
