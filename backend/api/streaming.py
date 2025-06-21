@@ -7,10 +7,6 @@ from backend import (
     AudioBuffersInstance,
     AudioStreamCache,
     WhisperCoreSingleModel,
-    CACHE_STREAMING_KEY,
-    CACHE_AUDIO_DATA,
-    CACHE_FILE_PATH,
-    CACHE_FILE_URL,
 )
 
 import os

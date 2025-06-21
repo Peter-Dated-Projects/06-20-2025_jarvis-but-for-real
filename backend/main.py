@@ -2,11 +2,10 @@ import flask_cors
 from flask import Flask, request, jsonify, Blueprint, redirect, url_for
 from flask_socketio import SocketIO, emit
 
-from backend import SocketIOInstance, AudioBuffersInstance, MongoDBInstance
+from backend import SocketIOInstance, AudioBuffersInstance
 
 from api.stt import stt_bp
 from api.streaming import streaming_bp
-from api.storage import storage_bp
 
 import os
 import dotenv
@@ -44,7 +43,6 @@ if __name__ == "__main__":
         # register blue prints
         app.register_blueprint(stt_bp, url_prefix="/stt")
         app.register_blueprint(streaming_bp, url_prefix="/streaming")
-        app.register_blueprint(storage_bp, url_prefix="/storage")
 
         # -------------------------------------------------- #
         # register custom objects
@@ -155,7 +153,7 @@ if __name__ == "__main__":
                 <input type="submit" value="Submit">
             </form>
             <div>
-                <h2>MongoDB Collections</h2>
+                <h2>PostgreSQL Tables</h2>
                 <ul>
                     Nothing so far
                 </ul>

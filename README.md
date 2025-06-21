@@ -9,7 +9,6 @@ Welcome to the Speech-To-Text Hackathon Project! This guide will help you get th
 
 ### Required Software
 - **Python 3.10** (required)
-- **Docker** (for MongoDB)
 - **Git** (to clone the repository)
 
 ### Check Python Version
