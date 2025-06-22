@@ -21,6 +21,22 @@ import traceback
 import pickle
 
 
+from source import requesthandler
+
+
+from dotenv import load_dotenv
+
+load_dotenv("../.env")
+
+# ------------------------------------------------------------ #
+# CONSTANTS
+# ------------------------------------------------------------- #
+
+NEW_SEGMENT_CREATED = 1
+SEGMENT_UPDATED = 2
+
+BACKEND_IP = os.environ.get("BACKEND_IP", "http://localhost:5001")
+
 # ------------------------------------------------------------ #
 # API functions
 # ------------------------------------------------------------ #
@@ -635,7 +651,7 @@ class WhisperCore:
     # ------------------------------------------------------------ #
     # audio processing / transcription functions
 
-    def update_stream(self):
+    def update_stream(self) -> Tuple[int, WhisperSegment]:
         """Updates the transcription with new audio data using correct time handling."""
 
         # here's how i'm going to approach this:
@@ -673,7 +689,7 @@ class WhisperCore:
             )
         if len(audio_clip) == 0:
             # no audio data to process
-            return
+            return (-1, 0)
         # print("Time Range", start_millis, end_millis)
         # print("Audio Clip Size", len(audio_clip))
         # print("Audio Clip Duration", len(audio_clip) / self._audio_storage._sample_rate)
@@ -682,7 +698,7 @@ class WhisperCore:
         results = self.transcribe_audio(audio_clip)
         if len(results) == 0:
             # no results to process
-            return
+            return (-1, 0)
 
         # STEP 4
         for seg in results:
@@ -720,6 +736,9 @@ class WhisperCore:
                     self._results_container.append(
                         WhisperSegmentChunk(time.time(), seg)
                     )
+                return (NEW_SEGMENT_CREATED, results[-1])
+            else:
+                return (SEGMENT_UPDATED, results[-1])
 
     def transcribe_audio(self, audio_data: np.array, **kwargs):
         """
@@ -876,7 +895,7 @@ def run_whisper_core(
 
     """
 
-    with toggles["threads_mutex"]:
+    with toggles["threads_controller_mutex"]:
         # check if threads are running
         active_threads = threading.enumerate()
         existing_mics = [
@@ -893,12 +912,17 @@ def run_whisper_core(
                 mic.join(timeout=1.0)
             return
 
+    with toggles["threads_controller_mutex"]:
+        # blocks until we reach
+        print("Waited for socket server to start")
+        pass
+
     # ------------------------------------------------------------ #
     # create objects
 
     # start printing out mic audio
     UPDATE_INTERVAL = 0.25
-    WHISPERCORE_INACTIVITY_TIMEOUT = 3.0  # seconds
+    WHISPERCORE_INACTIVITY_TIMEOUT = 2.0  # seconds
 
     SAMPLE_RATE = 16000  # samples per sec
     CHUNK_SIZE = 1024 * 4  # samples per chunk
@@ -967,6 +991,12 @@ def run_whisper_core(
                     toggles["enable_whispercore"] = True
                 print("Resuming WhisperCore processing...")
 
+                # send post request to turn on whispercore
+                requesthandler.send_post_request(
+                    BACKEND_IP + "/whispercore/status",
+                    {"status": "active"},
+                )
+
                 # reset the audio storage
                 whisper.reset_stream()
 
@@ -989,7 +1019,26 @@ def run_whisper_core(
             for blob in _audio_batch:
                 audio_storage.append_audio(blob)
 
-            whisper.update_stream()
+            result = whisper.update_stream()
+            if result[0] == SEGMENT_UPDATED:
+                requesthandler.send_post_request(
+                    BACKEND_IP + "/whispercore/segment_update",
+                    {
+                        "start_time": result[1].t0,
+                        "end_time": result[1].t1,
+                        "transcription": result[1].text,
+                    },
+                )
+            elif result[0] == NEW_SEGMENT_CREATED:
+                requesthandler.send_post_request(
+                    BACKEND_IP + "/whispercore/segment_creation",
+                    {
+                        "start_time": result[1].t0,
+                        "end_time": result[1].t1,
+                        "transcription": result[1].text,
+                    },
+                )
+
 
             # ---------------------------------------------- #
             # logic to determine if continue detecting or not
@@ -1001,6 +1050,12 @@ def run_whisper_core(
                     toggles["enable_whispercore"] = False
                 with toggles["mic_mutex"]:
                     toggles["enable_mic"] = False
+                
+                # send post request to turn off whispercore
+                requesthandler.send_post_request(
+                    BACKEND_IP + "/whispercore/status",
+                    {"status": "inactive"},
+                )
                 print("WhisperCore processing paused.")
 
             # --------------------------------------------- #

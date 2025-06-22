@@ -29,30 +29,6 @@ class SocketIOInstance:
         return SocketIOInstance.__INSTANCE
 
 
-# software handler
-class WhisperCoreHandlerObject:
-    __INSTANCE = None
-
-    def __init__(self):
-        self.streaming_id = None
-        self.file_path = None
-
-    @staticmethod
-    def get_instance() -> "WhisperCoreHandlerObject":
-        if not WhisperCoreHandlerObject.__INSTANCE:
-            WhisperCoreHandlerObject.__INSTANCE = WhisperCoreHandlerObject()
-        return WhisperCoreHandlerObject.__INSTANCE
-
-    @staticmethod
-    def is_connected() -> bool:
-        """
-        Check if the whisper core handler is connected.
-
-        Returns:
-            bool: True if connected, False otherwise.
-        """
-        return WhisperCoreHandlerObject.__INSTANCE.streaming_id is not None
-
 
 # client handler
 class ClientHandlerObject:

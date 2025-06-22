@@ -5,7 +5,6 @@ from flask import current_app as app
 from backend import (
     SocketIOInstance,
     ClientHandlerObject,
-    WhisperCoreHandlerObject,
 )
 
 import os
@@ -15,12 +14,9 @@ import os
 # blueprint + constants
 # --------------------------------------------------------------------------- #
 
-streaming_bp = Blueprint("streaming_bp", __name__)
+client_bp = Blueprint("client_bp", __name__)
 
 socket_io_instance = SocketIOInstance.get_instance()
-
-DEFAULT_MODEL = "assets/models/ggml-small.en.bin"
-
 
 # --------------------------------------------------------------------------- #
 # routes
@@ -71,14 +67,6 @@ def handle_setup_connect(data):
             namespace="/streaming",
         )
         return
-
-    # check sender
-    if sender == "software":
-        WhisperCoreHandlerObject.get_instance().streaming_id = request.sid
-        print("Software connected for audio streaming.")
-    elif sender == "client":
-        ClientHandlerObject.get_instance().streaming_id = request.sid
-        print("Client connected for audio streaming.")
 
     # emit a response to the client
     emit(
