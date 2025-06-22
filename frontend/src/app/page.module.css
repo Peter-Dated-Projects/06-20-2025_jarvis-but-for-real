@@ -164,6 +164,39 @@
   color: #555; /* Slightly lighter grey for timestamps */
 }
 
+/* Styling for TranscriptionSegmentCard component */
+.transcriptionSegmentCard {
+  background-color: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.transcriptionSegmentCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 3px 5px rgba(0, 0, 0, 0.08);
+}
+
+.transcriptionSegmentText {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #2c3e50;
+  word-wrap: break-word;
+}
+
+.transcriptionSegmentTime {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #6c757d;
+  display: flex;
+  justify-content: flex-end;
+  font-weight: 500;
+}
+
 /* Mobile responsiveness */
 @media (max-width: 700px) {
   .page {
@@ -202,5 +235,16 @@
   }
   .messageTable td:first-child {
     width: auto;
+  }
+  .transcriptionSegmentCard {
+    padding: 0.6rem 0.8rem;
+  }
+  
+  .transcriptionSegmentText {
+    font-size: 0.9rem;
+  }
+  
+  .transcriptionSegmentTime {
+    font-size: 0.75rem;
   }
 }

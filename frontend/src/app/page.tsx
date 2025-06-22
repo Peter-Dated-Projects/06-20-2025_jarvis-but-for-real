@@ -6,55 +6,135 @@ import styles from "./page.module.css";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
 
+interface TranscriptionSegment {
+  text: string;
+  start: number;
+  end: number;
+}
+
+function TranscriptionSegmentCard({ text, start, end }: TranscriptionSegment) {
+  return (
+    <div className={styles.transcriptionSegmentCard}>
+      <p className={styles.transcriptionSegmentText}>{text}</p>
+      <p className={styles.transcriptionSegmentTime}>
+        {start} - {end}
+      </p>
+    </div>
+  );
+}
+
 export default function Home() {
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [realTimeTranscription, setRealTimeTranscription] = useState("");
   const [messages, setMessages] = useState<{ text: string; timestamp: string; sender: string }[]>(
     []
   );
   const [currentMessage, setCurrentMessage] = useState("");
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const [socketId, setSocketId] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<string>("disconnected");
+  const [error, setError] = useState<string | null>(null);
 
-  const [activeModel, setActiveModel] = useState<string | null>(null);
+  // Added back for real-time transcription
+  const [isRealTimeSTT, setIsRealTimeSTT] = useState(false);
+  const [transcriptionSegments, setTranscriptionSegments] = useState<TranscriptionSegment[]>([]);
 
   useEffect(() => {
-    // Initialize socket connection
-    const newSocket = io(BACKEND_URL, {
-      // Changed to connect to the root namespace
+    console.log("Creating first object to test");
+    setTranscriptionSegments([
+      {
+        text: "This is a test transcription segment.",
+        start: 0,
+        end: 5,
+      },
+      {
+        text: "ADL WAHDLWAH",
+        start: 5,
+        end: 23,
+      },
+    ]);
+
+    // Initialize socket connection to the streaming namespace
+    const newSocket = io(BACKEND_URL + "/streaming", {
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       transports: ["websocket"],
     });
 
-    newSocket.on("connect", () => {
-      console.log("Socket connected:", newSocket.id);
+    // Set up socket event listeners
+    newSocket.on("connect", (data) => {
+      console.log("Socket connected:", data.sid);
       setSocket(newSocket);
-      setSocketId(newSocket.id); // Store the socket ID
+      setSocketId(data.sid);
+      setConnectionStatus("connected");
+      setError(null);
     });
 
-    newSocket.on("connect_response", (data) => {
-      console.log("Connection response:", data);
+    // handles real time stt enable signal
+    newSocket.on("real_time_stt_enable", (data) => {
+      console.log("Real-time STT enabled");
+      setIsRealTimeSTT(true);
     });
 
-    newSocket.on("new_message", (data: { text: string; timestamp: string; sender: string }) => {
-      console.log("New message from server:", data);
-      setMessages((prevMessages) => [...prevMessages, data]);
+    // handles real time stt disable signal
+    newSocket.on("real_time_stt_disable", (data) => {
+      console.log("Real-time STT disabled");
+      setIsRealTimeSTT(false);
+      setTranscriptionSegments([]); // Clear transcription segments when disabled
     });
 
+    // handles Real time stt message updates
+    newSocket.on("real_time_stt_segment_update", (data) => {
+      if (data.segment) {
+        // check length of array
+        const length = transcriptionSegments.length;
+
+        if (length == 0) {
+          // error
+          console.error("Received empty segment data");
+          return;
+        }
+
+        // update the last item
+        const lastSegment = transcriptionSegments[length - 1];
+        lastSegment.text = data.segment.text;
+        lastSegment.start = data.segment.start;
+        lastSegment.end = data.segment.end;
+
+        // update the state
+        setTranscriptionSegments((prev) => {
+          const updatedSegments = [...prev];
+          updatedSegments[length - 1] = lastSegment;
+          return updatedSegments;
+        });
+      }
+    });
+
+    // handles real time stt new messages
+    newSocket.on("real_time_stt_new_message", (data) => {
+      if (data.message) {
+        // Add the new message to the transcription segments
+        const newSegment: TranscriptionSegment = {
+          text: data.message.text,
+          start: data.message.start,
+          end: data.message.end,
+        };
+        setTranscriptionSegments((prev) => [...prev, newSegment]);
+
+        // Update real-time transcription display
+        setIsRealTimeSTT(true);
+      }
+    });
+
+    // Handle errors
     newSocket.on("error", (error) => {
       console.error("Socket error:", error);
+      setError(error.message || "An error occurred");
     });
 
     newSocket.on("disconnect", (reason) => {
       console.log("Socket disconnected:", reason);
       setSocket(null);
       setSocketId(null);
-      if (isRecording) {
-        // stopRecording(); // Consider if recording should stop automatically
-      }
+      setConnectionStatus("disconnected");
     });
 
     // Cleanup on component unmount
@@ -65,71 +145,15 @@ export default function Home() {
     };
   }, []); // Empty dependency array ensures this runs only once
 
-  const startRecording = async () => {
-    if (!socket || !socket.connected) {
-      alert("Socket not connected. Please wait.");
-      return;
-    }
-    if (isRecording) return;
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: "audio/webm" }); // Using webm as it's widely supported
-      audioChunksRef.current = [];
-
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-          // Send audio data in chunks
-          socket.emit("real_time_stt_request", {
-            sid: socket.id, // Include session ID for backend routing if needed
-            audio_data: event.data,
-            real_time: true,
-            audio_format: "webm", // Matches the mimeType
-            channels: 1, // Assuming mono audio
-            sample_rate:
-              mediaRecorderRef.current?.stream.getAudioTracks()[0].getSettings().sampleRate ||
-              48000,
-          });
-        }
-      };
-
-      mediaRecorderRef.current.onstop = () => {
-        // const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        // console.log("Recording stopped, final blob size:", audioBlob.size);
-        stream.getTracks().forEach((track) => track.stop());
-        if (socket && socket.connected) {
-          socket.emit("stop_recording", { sid: socket.id });
-        }
-      };
-
-      mediaRecorderRef.current.start(1000); // Send data every second
-      setIsRecording(true);
-      setRealTimeTranscription(""); // Clear previous transcription
-      console.log("Recording started");
-    } catch (error) {
-      console.error("Error starting recording:", error);
-      alert("Could not start recording. Please ensure microphone access is allowed.");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      console.log("Recording stopped by user");
-    }
-  };
-
   const handleSendMessage = () => {
     if (socket && socket.connected && currentMessage.trim() !== "") {
       const newMessage = {
         text: currentMessage,
         timestamp: new Date().toLocaleTimeString(),
-        sender: "User", // Or use socket.id for a unique sender ID
+        sender: "User",
       };
-      socket.emit("send_message", newMessage); // Emit to the default namespace
-      setMessages((prevMessages) => [...prevMessages, newMessage]); // Optimistically update UI
+      socket.emit("send_message", newMessage);
+      setMessages((prevMessages) => [...prevMessages, newMessage]);
       setCurrentMessage("");
     }
   };
@@ -137,45 +161,39 @@ export default function Home() {
   return (
     <div className={styles.page}>
       <main className={styles.main}>
-        <h1 className={styles.title}>Real-time Audio Transcription & Messaging</h1>
+        <h1 className={styles.title}>Text Messaging</h1>
 
-        <div className={styles.controls}>
-          <button
-            onClick={startRecording}
-            disabled={isRecording || !socket || !socket.connected}
-            className={styles.button}
-          >
-            Start Recording
-          </button>
-          <button
-            onClick={stopRecording}
-            disabled={!isRecording || !socket || !socket.connected}
-            className={styles.button}
-          >
-            Stop Recording
-          </button>
-        </div>
+        {connectionStatus === "disconnected" && (
+          <p className={styles.statusWarning}>Connecting to server...</p>
+        )}
+        {connectionStatus === "connection_error" && (
+          <p className={styles.statusWarning}>
+            Server connection error. Check console for details.
+          </p>
+        )}
+        {error && <p className={styles.statusWarning}>Error: {error}</p>}
 
-        {isRecording && <p className={styles.status}>Recording...</p>}
-        {!socket && <p className={styles.statusWarning}>Connecting to server...</p>}
-        {socket && !socket.connected && (
-          <p className={styles.statusWarning}>Server disconnected. Attempting to reconnect...</p>
+        {/* Added back real-time transcription display */}
+        {transcriptionSegments && (
+          <div className={styles.transcriptionSection}>
+            <h2>Real-time Transcription:</h2>
+            <p className={styles.transcriptionText}>
+              {transcriptionSegments.map((segment) => (
+                <TranscriptionSegmentCard
+                  key={segment.start}
+                  start={segment.start}
+                  end={segment.end}
+                  text={segment.text}
+                />
+              ))}
+            </p>
+          </div>
         )}
 
+        {/* Display for real time speech transcription */}
         <div>
-          Model: 
-          <select
-            className={styles.select}
-            value={socketId || ""}
-            onChange={(e) => }
-          ></select>
-        </div>
-
-        <div className={styles.transcriptionSection}>
-          <h2>Real-time Transcription:</h2>
-          <p className={styles.transcriptionText}>
-            {realTimeTranscription || "Waiting for audio..."}
-          </p>
+          <h2>Socket ID: {socketId}</h2>
+          <p>Connection Status: {connectionStatus}</p>
         </div>
 
         <div className={styles.messageSection}>
