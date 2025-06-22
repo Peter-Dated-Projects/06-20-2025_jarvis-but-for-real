@@ -195,11 +195,11 @@ if __name__ == "__main__":
         "threads_active": False,
         "threads_controller_mutex": threading.RLock(),
     }
-    
+
     # ------------------------------------------------------------------- #
     # take over the threads controller mutex first
     GLOBAL_ARGS["threads_controller_mutex"].acquire()
-    
+
     whispercore_thread = threading.Thread(
         target=whispercore_main.run_whisper_core,
         args=(GLOBAL_ARGS,),
@@ -228,4 +228,3 @@ if __name__ == "__main__":
         debug=False,
         allow_unsafe_werkzeug=True,  # Add this line
     )
-

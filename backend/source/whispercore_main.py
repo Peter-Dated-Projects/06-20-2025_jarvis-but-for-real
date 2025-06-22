@@ -1039,7 +1039,6 @@ def run_whisper_core(
                     },
                 )
 
-
             # ---------------------------------------------- #
             # logic to determine if continue detecting or not
             # if no new phrases in 1 second, end stt
@@ -1050,11 +1049,19 @@ def run_whisper_core(
                     toggles["enable_whispercore"] = False
                 with toggles["mic_mutex"]:
                     toggles["enable_mic"] = False
-                
+
                 # send post request to turn off whispercore
                 requesthandler.send_post_request(
                     BACKEND_IP + "/whispercore/status",
                     {"status": "inactive"},
+                )
+                requesthandler.send_post_request(
+                    BACKEND_IP + "/whispercore/session_completion",
+                    {
+                        "messages": [
+                            seg.segment.text for seg in whisper._results_container
+                        ]
+                    },
                 )
                 print("WhisperCore processing paused.")
 

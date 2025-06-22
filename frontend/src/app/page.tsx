@@ -4,13 +4,18 @@ import { useEffect, useState, useRef } from "react";
 import io, { Socket } from "socket.io-client";
 import styles from "./page.module.css";
 
+// ----------------------------------------------------------------- //
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
 
+// ----------------------------------------------------------------- //
 interface TranscriptionSegment {
   text: string;
   start: number;
   end: number;
 }
+
+// ----------------------------------------------------------------- //
 
 function TranscriptionSegmentCard({ text, start, end }: TranscriptionSegment) {
   return (
@@ -23,19 +28,28 @@ function TranscriptionSegmentCard({ text, start, end }: TranscriptionSegment) {
   );
 }
 
+// ----------------------------------------------------------------- //
+
 export default function Home() {
-  const [socket, setSocket] = useState<Socket | null>(null);
+  // ----------------------------------------------------------------- //
+  // states
+
   const [messages, setMessages] = useState<{ text: string; timestamp: string; sender: string }[]>(
     []
   );
   const [currentMessage, setCurrentMessage] = useState("");
+
+  // socket + events
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [socketId, setSocketId] = useState<string | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<string>("disconnected");
   const [error, setError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<string>("disconnected");
 
   // Added back for real-time transcription
-  const [isRealTimeSTT, setIsRealTimeSTT] = useState(false);
   const [transcriptionSegments, setTranscriptionSegments] = useState<TranscriptionSegment[]>([]);
+
+  // ----------------------------------------------------------------- //
+  // Effect to handle socket connection and events
 
   useEffect(() => {
     console.log("Creating first object to test");
@@ -52,85 +66,69 @@ export default function Home() {
       },
     ]);
 
+    // ----------------------------------------------------------------- //
     // Initialize socket connection to the streaming namespace
-    const newSocket = io(BACKEND_URL + "/streaming", {
+    console.log("Connecting to socket at:", `${BACKEND_URL}/propagate_whisper_events`);
+    const socket_url = `${BACKEND_URL}/propagate_whisper_events`;
+    const propagateSocket = io(socket_url, {
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       transports: ["websocket"],
     });
 
     // Set up socket event listeners
-    newSocket.on("connect", (data) => {
+    propagateSocket.on("confirm_connect", (data) => {
       console.log("Socket connected:", data.sid);
-      setSocket(newSocket);
+      setSocket(propagateSocket);
       setSocketId(data.sid);
       setConnectionStatus("connected");
       setError(null);
     });
 
-    // handles real time stt enable signal
-    newSocket.on("real_time_stt_enable", (data) => {
-      console.log("Real-time STT enabled");
-      setIsRealTimeSTT(true);
-    });
-
-    // handles real time stt disable signal
-    newSocket.on("real_time_stt_disable", (data) => {
-      console.log("Real-time STT disabled");
-      setIsRealTimeSTT(false);
-      setTranscriptionSegments([]); // Clear transcription segments when disabled
-    });
-
-    // handles Real time stt message updates
-    newSocket.on("real_time_stt_segment_update", (data) => {
-      if (data.segment) {
-        // check length of array
-        const length = transcriptionSegments.length;
-
-        if (length == 0) {
-          // error
-          console.error("Received empty segment data");
-          return;
-        }
-
-        // update the last item
-        const lastSegment = transcriptionSegments[length - 1];
-        lastSegment.text = data.segment.text;
-        lastSegment.start = data.segment.start;
-        lastSegment.end = data.segment.end;
-
-        // update the state
-        setTranscriptionSegments((prev) => {
-          const updatedSegments = [...prev];
-          updatedSegments[length - 1] = lastSegment;
-          return updatedSegments;
-        });
+    // status update event
+    propagateSocket.on("status_update", (data) => {
+      console.log("Status update:", data.status);
+      setConnectionStatus(data.status);
+      if (data.status === "connection_error") {
+        setError("Connection error occurred. Please check the console for details.");
+      } else {
+        setError(null);
       }
     });
 
-    // handles real time stt new messages
-    newSocket.on("real_time_stt_new_message", (data) => {
-      if (data.message) {
-        // Add the new message to the transcription segments
-        const newSegment: TranscriptionSegment = {
-          text: data.message.text,
-          start: data.message.start,
-          end: data.message.end,
-        };
-        setTranscriptionSegments((prev) => [...prev, newSegment]);
+    // segment update event
+    propagateSocket.on("segment_update", (data: TranscriptionSegment) => {
+      console.log("Segment update received:", data);
+      setTranscriptionSegments((prevSegments) => [
+        ...prevSegments,
+        {
+          text: data.text,
+          start: data.start,
+          end: data.end, // Ensure end time is included
+        },
+      ]);
+    });
 
-        // Update real-time transcription display
-        setIsRealTimeSTT(true);
-      }
+    // segment creation event
+    propagateSocket.on("segment_creation", (data: TranscriptionSegment) => {
+      console.log("Segment creation event received:", data);
+      setTranscriptionSegments((prevSegments) => [
+        ...prevSegments,
+        {
+          text: data.text,
+          start: data.start,
+          end: data.end, // Ensure end time is included
+        },
+      ]);
     });
 
     // Handle errors
-    newSocket.on("error", (error) => {
+    propagateSocket.on("error", (error) => {
       console.error("Socket error:", error);
       setError(error.message || "An error occurred");
     });
 
-    newSocket.on("disconnect", (reason) => {
+    propagateSocket.on("disconnect", (reason) => {
       console.log("Socket disconnected:", reason);
       setSocket(null);
       setSocketId(null);
@@ -139,8 +137,8 @@ export default function Home() {
 
     // Cleanup on component unmount
     return () => {
-      if (newSocket.connected) {
-        newSocket.disconnect();
+      if (propagateSocket.connected) {
+        propagateSocket.disconnect();
       }
     };
   }, []); // Empty dependency array ensures this runs only once
@@ -177,7 +175,7 @@ export default function Home() {
         {transcriptionSegments && (
           <div className={styles.transcriptionSection}>
             <h2>Real-time Transcription:</h2>
-            <p className={styles.transcriptionText}>
+            <div className={styles.transcriptionText}>
               {transcriptionSegments.map((segment) => (
                 <TranscriptionSegmentCard
                   key={segment.start}
@@ -186,7 +184,7 @@ export default function Home() {
                   text={segment.text}
                 />
               ))}
-            </p>
+            </div>
           </div>
         )}
 

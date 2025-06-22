@@ -29,7 +29,6 @@ class SocketIOInstance:
         return SocketIOInstance.__INSTANCE
 
 
-
 # client handler
 class ClientHandlerObject:
     __INSTANCE = None

@@ -4,7 +4,6 @@ from flask_socketio import SocketIO, emit
 from flask import current_app as app
 from backend import (
     SocketIOInstance,
-    ClientHandlerObject,
 )
 
 import os
