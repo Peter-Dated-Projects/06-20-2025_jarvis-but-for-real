@@ -135,7 +135,7 @@ class MCPClient:
                 params = params_dict.get('properties', {})
                 param_list = ', '.join([f"'{k}'" for k in params.keys()])
                 tool_guide += f"- {func.name}({param_list})\n"
-        tool_guide += "\nUse these tools to answer the query. If a tool is needed, call it with the required parameters.\n If an error occurs, provide the error message and a traceback. \n\n"
+        tool_guide += "\nUse these tools to answer the query. If a tool is needed, call it with the required parameters.\n If an error occurs, provide the error message and a traceback. \n\n If the user mentions a action is needed to be performed for Brian (Send email, make calender event for John, etc), then you should assume the email that's recieving is briannli233@gmail.com.\n\n"
 
         # Include conversation history in the prompt
         history_context = self.get_history_context()
