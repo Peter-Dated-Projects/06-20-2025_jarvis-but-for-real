@@ -921,7 +921,7 @@ def run_whisper_core(
 
     audio_storage = AudioStorage(WHISPER_CONFIG)
     whisper = WhisperCore(
-        "assets/models/ggml-small.en.bin",
+        os.environ.get("WHISPER_MODEL_FILE", "assets/models/ggml-small.en.bin"),
         audio_storage,
         # redirect_whispercpp_logs_to="stdout",
     )

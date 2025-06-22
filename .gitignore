@@ -7,3 +7,5 @@
 .venv
 
 **.zip
+
+whisper.cpp
