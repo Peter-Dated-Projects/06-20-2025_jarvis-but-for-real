@@ -1,14 +1,19 @@
+import time
 import flask_cors
 from flask import Flask, request, jsonify, Blueprint, redirect, url_for
 from flask_socketio import SocketIO, emit
 
-from backend import SocketIOInstance, AudioBuffersInstance
+from backend import SocketIOInstance, ClientHandlerObject, SoftwareHandlerObject
 
 from api.stt import stt_bp
 from api.streaming import streaming_bp
 
+import threading
+
 import os
 import dotenv
+
+from source import whispercore_main, sesame_main
 
 # ---------------------------------------------------------------------------- #
 
@@ -172,6 +177,29 @@ if __name__ == "__main__":
     # Run App
     # ----------------------------------------------------------------------------- #
 
+    GLOBAL_ARGS = {
+        # mic
+        "enable_mic": True,
+        "mic_mutex": threading.RLock(),
+        # whispercore
+        "enable_whispercore": True,
+        "whispercore_mutex": threading.RLock(),
+        # wake word
+        "wake_word_detected": False,
+        "wake_word_mutex": threading.RLock(),
+        # ---
+        # ---
+        # for thread -- disables duplicates
+        "threads_mutex": threading.RLock(),
+    }
+
+    whispercore_thread = threading.Thread(
+        target=whispercore_main.run_whisper_core,
+        args=(GLOBAL_ARGS,),
+        daemon=True,
+    )
+    whispercore_thread.start()
+
     socket_io_instance = SocketIOInstance.get_instance()
 
     print(
@@ -182,6 +210,7 @@ if __name__ == "__main__":
     socket_io_instance.run(
         app,
         host=os.getenv("BACKEND_HOST", "localhost"),
-        port=os.getenv("BACKEND_PORT", 5001),
-        debug=os.getenv("DEBUG", True),
+        port=int(os.getenv("BACKEND_PORT", 5001)),  # Ensure port is an integer
+        debug=False,
+        allow_unsafe_werkzeug=True,  # Add this line
     )
