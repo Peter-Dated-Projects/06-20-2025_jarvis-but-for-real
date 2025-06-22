@@ -3,7 +3,7 @@ import flask_cors
 from flask import Flask, request, jsonify, Blueprint, redirect, url_for
 from flask_socketio import SocketIO, emit
 
-from backend import SocketIOInstance, ClientHandlerObject, SoftwareHandlerObject
+from backend import SocketIOInstance, ClientHandlerObject, WhisperCoreHandlerObject
 
 from api.stt import stt_bp
 from api.streaming import streaming_bp
