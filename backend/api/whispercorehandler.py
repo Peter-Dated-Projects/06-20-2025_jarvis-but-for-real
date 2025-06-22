@@ -7,6 +7,7 @@ from backend import (
     ClientHandlerObject,
 )
 
+import json
 import os
 
 
@@ -20,6 +21,7 @@ socket_io_instance = SocketIOInstance.get_instance()
 
 PROPAGATE_WHISPER_EVENTS_NAMESPACE = "/propagate_whisper_events"
 
+GENERATED_AUDIO_FILE = "kokoro_output.wav"
 
 # --------------------------------------------------------------------------- #
 # socket events
@@ -166,8 +168,47 @@ def handle_session_completion():
                 "http://localhost:5001/query",
                 json={"query": command_gemini}
             )
+
+            _dict_response = json.loads(response.content)
+
+            # emit a signal to the client 
+            socket_io_instance.emit(
+                "gemini_response",
+                _dict_response,
+                namespace=PROPAGATE_WHISPER_EVENTS_NAMESPACE,
+            )
+            
         except requests.exceptions.RequestException as e:
             app.logger.error(f"Error sending request to /query: {e}")
             return jsonify({"error": "Failed to send request to /query"}), 500
 
     return jsonify({"status": "success"}), 200
+
+
+
+# /whispercore/get_audio
+@whisper_core_bp.route("/get_audio", methods=["GET"])
+def handle_get_audio():
+    """
+    Handle requests to get the generated audio file from the whisper core handler.
+
+    This route is used to retrieve the generated audio file.
+    """
+    file_path = os.path.join(app.root_path, GENERATED_AUDIO_FILE)
+
+    if not os.path.exists(file_path):
+        app.logger.error("Generated audio file does not exist.")
+        return jsonify({"error": "Generated audio file not found"}), 404
+
+    try:
+        with open(file_path, "rb") as audio_file:
+            audio_data = audio_file.read()
+        return app.response_class(
+            response=audio_data,
+            status=200,
+            mimetype="audio/wav",
+            headers={"Content-Disposition": f'attachment; filename="{GENERATED_AUDIO_FILE}"'},
+        )
+    except Exception as e:
+        app.logger.error(f"Error reading audio file: {e}")
+        return jsonify({"error": "Failed to read audio file"}), 500

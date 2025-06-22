@@ -1,259 +1,348 @@
 "use client";
 
-import { useEffect, useState, useRef, useReducer } from "react";
-import io, { Socket } from "socket.io-client";
-import styles from "./page.module.css";
-
-// ----------------------------------------------------------------- //
+import { useEffect, useState } from "react";
+import io, { type Socket } from "socket.io-client";
+import { MessageCircle, Mic, Wifi, WifiOff, Send } from "lucide-react";
+// Remove the CSS module import since you're using regular CSS
+// import "./page.module.css"
 
 const BACKEND_URL = "http://localhost:5001";
 
-// ----------------------------------------------------------------- //
 interface TranscriptionSegment {
-  transcription: string;
-  start_time: number;
-  end_time: number;
+	transcription: string;
+	start_time: number;
+	end_time: number;
 }
 
 interface TranscriptionSegmentCardProps {
-  text: string;
-  start: number;
-  end: number;
+	text: string;
+	start: number;
+	end: number;
 }
 
-// ----------------------------------------------------------------- //
-
-function TranscriptionSegmentCard({ text, start, end }: TranscriptionSegmentCardProps) {
-  return (
-    <div className={styles.transcriptionSegmentCard}>
-      <p className={styles.transcriptionSegmentText}>Text: {text}</p>
-      <p className={styles.transcriptionSegmentTime}>
-        Start: {start} - End: {end}
-      </p>
-    </div>
-  );
+function TranscriptionSegmentCard({
+	text,
+	start,
+	end,
+}: TranscriptionSegmentCardProps) {
+	return (
+		<div className="transcription-card">
+			<p className="transcription-text">{text}</p>
+			<div className="transcription-time">
+				<span>Start: {start}s</span>
+				<span>End: {end}s</span>
+			</div>
+		</div>
+	);
 }
-
-// ----------------------------------------------------------------- //
 
 export default function Home() {
-  // ----------------------------------------------------------------- //
-  // states
+	const [messages, setMessages] = useState<
+		{ text: string; timestamp: string; sender: string }[]
+	>([]);
+	const [currentMessage, setCurrentMessage] = useState("");
+	const [socket, setSocket] = useState<Socket | null>(null);
+	const [socketId, setSocketId] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [connectionStatus, setConnectionStatus] =
+		useState<string>("disconnected");
+	const [transcriptionSegments, setTranscriptionSegments] = useState<
+		TranscriptionSegmentCardProps[]
+	>([]);
 
-  const [messages, setMessages] = useState<{ text: string; timestamp: string; sender: string }[]>(
-    []
-  );
-  const [currentMessage, setCurrentMessage] = useState("");
+	useEffect(() => {
+		console.log("Creating first object to test");
 
-  // socket + events
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [socketId, setSocketId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+		setTranscriptionSegments([
+			{
+				text: "This is a test transcription segment.",
+				start: 0,
+				end: 5,
+			},
+		]);
 
-  // Added back for real-time transcription
-  const [connectionStatus, setConnectionStatus] = useState<string>("disconnected");
-  const [transcriptionSegments, setTranscriptionSegments] = useState<
-    TranscriptionSegmentCardProps[]
-  >([]);
+		console.log(
+			"Connecting to socket at:",
+			`${BACKEND_URL}/propagate_whisper_events`
+		);
+		const socket_url = `${BACKEND_URL}/propagate_whisper_events`;
+		const propagateSocket = io(socket_url, {
+			reconnectionAttempts: 5,
+			reconnectionDelay: 1000,
+			transports: ["websocket"],
+		});
 
-  // ----------------------------------------------------------------- //
-  // Effect to handle socket connection and events
+		propagateSocket.on("confirm_connect", (data) => {
+			console.log("Socket connected:", data.sid);
+			setSocket(propagateSocket);
+			setSocketId(data.sid);
+			setConnectionStatus("connected");
+			setError(null);
+		});
 
-  useEffect(() => {
-    console.log("Creating first object to test");
+		propagateSocket.on("status_update", (data) => {
+			console.log("Status update:", data.status);
+			setConnectionStatus(data.status);
+			if (data.status === "active") {
+				// reset the transcription segments when the connection is active
+				setTranscriptionSegments([]);
+			}
 
-    setTranscriptionSegments([
-      {
-        text: "This is a test transcription segment.",
-        start: 0,
-        end: 5,
-      },
-    ]);
+			if (data.status === "connection_error") {
+				setError(
+					"Connection error occurred. Please check the console for details."
+				);
+			} else {
+				setError(null);
+			}
+		});
 
-    // ----------------------------------------------------------------- //
-    // Initialize socket connection to the streaming namespace
-    console.log("Connecting to socket at:", `${BACKEND_URL}/propagate_whisper_events`);
-    const socket_url = `${BACKEND_URL}/propagate_whisper_events`;
-    const propagateSocket = io(socket_url, {
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      transports: ["websocket"],
-    });
+		propagateSocket.on("segment_update", (data: TranscriptionSegment) => {
+			console.log("Segment update received:", data);
 
-    // Set up socket event listeners
-    propagateSocket.on("confirm_connect", (data) => {
-      console.log("Socket connected:", data.sid);
-      setSocket(propagateSocket);
-      setSocketId(data.sid);
-      setConnectionStatus("connected");
-      setError(null);
-    });
+			setTranscriptionSegments((prevSegments) => {
+				if (prevSegments.length === 0)
+					return [
+						{
+							text: data.transcription,
+							start: data.start_time,
+							end: data.end_time,
+						},
+					];
+				const lastIndex = prevSegments.length - 1;
+				const updatedSegments = [...prevSegments];
+				updatedSegments[lastIndex] = {
+					text: data.transcription,
+					start: data.start_time,
+					end: data.end_time,
+				};
+				return updatedSegments;
+			});
+		});
 
-    // status update event
-    propagateSocket.on("status_update", (data) => {
-      console.log("Status update:", data.status);
-      setConnectionStatus(data.status);
-      if (data.status === "connection_error") {
-        setError("Connection error occurred. Please check the console for details.");
-      } else {
-        setError(null);
-      }
-    });
+		propagateSocket.on("segment_creation", (data: TranscriptionSegment) => {
+			console.log("Segment creation event received:", data);
+			setTranscriptionSegments((prevSegments) => [
+				...prevSegments,
+				{
+					text: data.transcription,
+					start: data.start_time,
+					end: data.end_time,
+				},
+			]);
+		});
 
-    // segment update event
-    propagateSocket.on("segment_update", (data: TranscriptionSegment) => {
-      console.log("Segment update received:", data);
+		propagateSocket.on("gemini_response", (data) => {
+			console.log("Gemini response received:", data);
 
-      // Update the last segment if it matches the start time, else ignore
-      setTranscriptionSegments((prevSegments) => {
-        if (prevSegments.length === 0) return prevSegments;
-        const lastIndex = prevSegments.length - 1;
-        // Update the last segment
-        const updatedSegments = [...prevSegments];
-        updatedSegments[lastIndex] = {
-          text: data.transcription,
-          start: data.start_time,
-          end: data.end_time,
-        };
-        return updatedSegments;
-      });
-    });
+			// receive file + play it
+			fetch(`${BACKEND_URL}/whispercore/get_audio`)
+				.then((response) => {
+					if (!response.ok) {
+						throw new Error("Network response was not ok");
+					}
+					return response.blob();
+				})
+				.then((audioBlob) => {
+					const audioUrl = URL.createObjectURL(audioBlob);
+					const audio = new Audio(audioUrl);
+					audio.play().catch((error) => {
+						console.error("Error playing audio:", error);
+					});
+				})
+				.catch((error) => {
+					console.error("Error fetching audio:", error);
+				});
+		});
 
-    // segment creation event
-    propagateSocket.on("segment_creation", (data: TranscriptionSegment) => {
-      console.log("Segment creation event received:", data);
-      // Add new segment to the list
-      setTranscriptionSegments((prevSegments) => [
-        ...prevSegments,
-        { text: data.transcription, start: data.start_time, end: data.end_time },
-      ]);
-    });
+		propagateSocket.on("error", (error) => {
+			console.error("Socket error:", error);
+			setError(error.message || "An error occurred");
+		});
 
-    // Handle errors
-    propagateSocket.on("error", (error) => {
-      console.error("Socket error:", error);
-      setError(error.message || "An error occurred");
-    });
+		propagateSocket.on("disconnect", (reason) => {
+			console.log("Socket disconnected:", reason);
+			setSocket(null);
+			setSocketId(null);
+			setConnectionStatus("disconnected");
+		});
 
-    propagateSocket.on("disconnect", (reason) => {
-      console.log("Socket disconnected:", reason);
-      setSocket(null);
-      setSocketId(null);
-      setConnectionStatus("disconnected");
-    });
+		return () => {
+			if (propagateSocket.connected) {
+				propagateSocket.disconnect();
+			}
+		};
+	}, []);
 
-    // Cleanup on component unmount
-    return () => {
-      if (propagateSocket.connected) {
-        propagateSocket.disconnect();
-      }
-    };
-  }, []); // Empty dependency array ensures this runs only once
+	const handleSendMessage = () => {
+		if (socket && socket.connected && currentMessage.trim() !== "") {
+			const newMessage = {
+				text: currentMessage,
+				timestamp: new Date().toLocaleTimeString(),
+				sender: "User",
+			};
+			socket.emit("send_message", newMessage);
+			setMessages((prevMessages) => [...prevMessages, newMessage]);
+			setCurrentMessage("");
+		}
+	};
 
-  const handleSendMessage = () => {
-    if (socket && socket.connected && currentMessage.trim() !== "") {
-      const newMessage = {
-        text: currentMessage,
-        timestamp: new Date().toLocaleTimeString(),
-        sender: "User",
-      };
-      socket.emit("send_message", newMessage);
-      setMessages((prevMessages) => [...prevMessages, newMessage]);
-      setCurrentMessage("");
-    }
-  };
+	useEffect(() => {
+		console.log("Transcription segments updated:", transcriptionSegments);
+	}, [transcriptionSegments]);
 
-  // Add this log to see changes to the state
-  useEffect(() => {
-    console.log("Transcription segments updated:", transcriptionSegments);
-  }, [transcriptionSegments]);
+	return (
+		<div className="app-container">
+			<div className="background-decoration"></div>
 
-  return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <h1 className={styles.title}>Text Messaging</h1>
+			<div className="main-content">
+				{/* Header */}
+				<div className="header">
+					<h1 className="main-title">S.O.N.A.</h1>
+					<p className="subtitle">
+						Sentiment Operational & Natural Assistant
+					</p>
+					<p>
+						A real-time transcription tool for seamless
+						communication and live updates
+					</p>
+				</div>
 
-        {connectionStatus === "disconnected" && (
-          <p className={styles.statusWarning}>Connecting to server...</p>
-        )}
-        {connectionStatus === "connection_error" && (
-          <p className={styles.statusWarning}>
-            Server connection error. Check console for details.
-          </p>
-        )}
-        {error && <p className={styles.statusWarning}>Error: {error}</p>}
+				{/* Status Bar */}
+				<div className="status-bar">
+					<div className="status-content">
+						<div className="connection-status">
+							{connectionStatus === "active" ||
+							connectionStatus === "connected" ? (
+								<div className="status-connected">
+									<Wifi className="status-icon" />
+									<span className="status-text">
+										{connectionStatus === "active"
+											? "Recording..."
+											: "Connected"}
+									</span>
+								</div>
+							) : (
+								<div className="status-disconnected">
+									<WifiOff className="status-icon" />
+									<span className="status-text">
+										{connectionStatus === "disconnected"
+											? "Connecting..."
+											: "Connection Error"}
+									</span>
+								</div>
+							)}
+						</div>
+						{socketId && (
+							<div className="socket-id">
+								Socket ID:{" "}
+								<span className="socket-id-value">
+									{socketId}
+								</span>
+							</div>
+						)}
+					</div>
+					{error && <div className="error-message">{error}</div>}
+				</div>
 
-        {/* Added back real-time transcription display */}
-        {transcriptionSegments && (
-          <div className={styles.transcriptionSection}>
-            <h2>Real-Time Transcription:</h2>
-            <div className={styles.transcriptionText}>
-              {transcriptionSegments.map((segment, index) => (
-                <TranscriptionSegmentCard
-                  key={index} // Include the counter in the key
-                  text={segment.text}
-                  start={segment.start}
-                  end={segment.end}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+				<div className="content-grid">
+					{/* Transcription Section */}
+					<div className="section-card transcription-section">
+						<div className="section-header">
+							<div className="section-icon transcription-icon">
+								<Mic className="icon" />
+							</div>
+							<h2 className="section-title">
+								Live Transcription
+							</h2>
+						</div>
 
-        {/* Display for real time speech transcription */}
-        <div>
-          <h2>Socket ID: {socketId}</h2>
-          <p>Connection Status: {connectionStatus}</p>
-        </div>
+						<div className="transcription-container">
+							{transcriptionSegments.map((segment, index) => (
+								<TranscriptionSegmentCard
+									key={index}
+									text={segment.text}
+									start={segment.start}
+									end={segment.end}
+								/>
+							))}
+						</div>
+					</div>
 
-        <div className={styles.messageSection}>
-          <h2>Messages</h2>
-          <div className={styles.messageInput}>
-            <input
-              type="text"
-              value={currentMessage}
-              onChange={(e) => setCurrentMessage(e.target.value)}
-              placeholder="Type your message"
-              className={styles.input}
-              onKeyPress={(event) => {
-                if (event.key === "Enter") {
-                  handleSendMessage();
-                }
-              }}
-            />
-            <button
-              onClick={handleSendMessage}
-              className={styles.button}
-              disabled={!socket || !socket.connected}
-            >
-              Send
-            </button>
-          </div>
-          <table className={styles.messageTable}>
-            <thead>
-              <tr>
-                <th>Timestamp</th>
-                <th>Sender</th>
-                <th>Message</th>
-              </tr>
-            </thead>
-            <tbody>
-              {messages.map((msg, index) => (
-                <tr key={index}>
-                  <td>{msg.timestamp}</td>
-                  <td>{msg.sender}</td>
-                  <td>{msg.text}</td>
-                </tr>
-              ))}
-              {messages.length === 0 && (
-                <tr>
-                  <td colSpan={3}>No messages yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </main>
-    </div>
-  );
+					{/* Messages Section */}
+					<div className="section-card messages-section">
+						<div className="section-header">
+							<div className="section-icon messages-icon">
+								<MessageCircle className="icon" />
+							</div>
+							<h2 className="section-title">Messages</h2>
+						</div>
+
+						{/* Message Input */}
+						<div className="message-input-container">
+							<input
+								type="text"
+								value={currentMessage}
+								onChange={(e) =>
+									setCurrentMessage(e.target.value)
+								}
+								placeholder="Type your message..."
+								className="message-input"
+								onKeyPress={(event) => {
+									if (event.key === "Enter") {
+										handleSendMessage();
+									}
+								}}
+							/>
+							<button
+								onClick={handleSendMessage}
+								disabled={!socket || !socket.connected}
+								className="send-button"
+							>
+								<Send className="send-icon" />
+								Send
+							</button>
+						</div>
+
+						{/* Messages Display */}
+						<div className="messages-display">
+							{messages.length === 0 ? (
+								<div className="no-messages">
+									<MessageCircle className="no-messages-icon" />
+									<p>
+										No messages yet. Start a conversation!
+									</p>
+								</div>
+							) : (
+								<div className="messages-list">
+									{messages.map((msg, index) => (
+										<div
+											key={index}
+											className={`message-item ${
+												index % 2 === 0
+													? "message-even"
+													: "message-odd"
+											}`}
+										>
+											<div className="message-header">
+												<span className="message-sender">
+													{msg.sender}
+												</span>
+												<span className="message-timestamp">
+													{msg.timestamp}
+												</span>
+											</div>
+											<p className="message-text">
+												{msg.text}
+											</p>
+										</div>
+									))}
+								</div>
+							)}
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	);
 }
