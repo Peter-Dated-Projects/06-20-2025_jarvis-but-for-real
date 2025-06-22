@@ -81,13 +81,20 @@ class AsyncMicrophone(threading.Thread):
         filename: str = None,
         global_run_config: Dict[str, Any] = None,
     ):
-        super().__init__(daemon=True)
+        super().__init__(daemon=True, name=f"AsyncMicrophone-{int(time.time())}")
 
         self._audio = pyaudio.PyAudio()
         self._stream = None
         self._is_running = False
         self._audio_queue: Queue[np.array] = Queue()
         self._audio_queue_lock = threading.RLock()
+
+        # Add buffer for accumulating audio data
+        self._audio_buffer = np.array([], dtype=np.float32)
+        self._buffer_lock = threading.RLock()
+
+        # Store the original larger chunk size for whisper
+        self._whisper_chunk_size = chunk_size
 
         # audio settings
         self._audio_config = audio_config
@@ -115,7 +122,6 @@ class AsyncMicrophone(threading.Thread):
             access_key=os.environ.get("PVPORCUPINE_API", None),
             keyword_paths=self._porcupine_phrase_files,
         )
-        self._chunk_size = self._porcupine.frame_length
 
         if filename:
             self._audio_config = AudioConfig.get_config_from_wav(filename)
@@ -226,7 +232,6 @@ class AsyncMicrophone(threading.Thread):
 
             # ------------------------------------------------------------ #
             # query user
-
             _input = int(input("Press Enter to start recording..."))
             # _input = 0
             print(f"Selected device: {_mic_choices[_input-1]}")
@@ -248,35 +253,16 @@ class AsyncMicrophone(threading.Thread):
                 self._is_running = True
                 while self._is_running:
 
-                    # read audio data from stream
-                    audio_data = self._stream.read(
-                        self._porcupine.frame_length, exception_on_overflow=False
-                    )
-
-                    # preformat audio data
-                    audio_data = np.frombuffer(audio_data, dtype=np.int16)
-
-                    # run porcupine to detect wake word
-                    pvporcupine_result = self._porcupine.process(audio_data)
-                    # pvporcupine_result = -1
-                    # print("Porcupine Result:", pvporcupine_result)
-
-                    if pvporcupine_result >= 0:
-                        print("Wake word detected! Starting recording...")
-                        with self._GLOBAL_ARGS["wake_word_mutex"]:
-                            self._GLOBAL_ARGS["wake_word_detected"] = True
-                        with self._GLOBAL_ARGS["mic_mutex"]:
-                            self._GLOBAL_ARGS["enable_mic"] = True
-
-                    # if can record, then record
+                    # Check if we should process audio
                     self._GLOBAL_ARGS["mic_mutex"].acquire()
                     if self._GLOBAL_ARGS["enable_mic"]:
                         self._GLOBAL_ARGS["mic_mutex"].release()
-                        # if 1:
 
-                        # PAUSE IT UNTIL WE WANT IT UP AGAIN
-                        # enable reading + etc
-                        # continue formatting
+                        # read audio data from stream
+                        audio_data = self._stream.read(
+                            self._chunk_size, exception_on_overflow=False
+                        )
+                        audio_data = np.frombuffer(audio_data, dtype=np.int16)
                         audio_data = audio_data.astype(np.float32) / 32768.0
 
                         # convert into 1 channel if multiple channels
@@ -296,6 +282,26 @@ class AsyncMicrophone(threading.Thread):
                         with self._audio_queue_lock:
                             self._audio_queue.put(audio_data)
 
+                    else:
+                        self._GLOBAL_ARGS["mic_mutex"].release()
+                        # ------------------------------------------------ #
+                        # Read small frames for wake word detection
+                        audio_data = self._stream.read(
+                            self._porcupine._frame_length, exception_on_overflow=False
+                        )
+                        # run porcupine code
+                        audio_data = np.frombuffer(audio_data, dtype=np.int16)
+
+                        # Wake word detection
+                        pvporcupine_result = self._porcupine.process(audio_data)
+
+                        if pvporcupine_result >= 0:
+                            print("Wake word detected! Starting recording...")
+                            with self._GLOBAL_ARGS["wake_word_mutex"]:
+                                self._GLOBAL_ARGS["wake_word_detected"] = True
+                            with self._GLOBAL_ARGS["mic_mutex"]:
+                                self._GLOBAL_ARGS["enable_mic"] = True
+
             except KeyboardInterrupt:
                 print("Recording stopped by user.")
             except Exception as e:
@@ -307,6 +313,7 @@ class AsyncMicrophone(threading.Thread):
             self._stream.stop_stream()
             self._stream.close()
             self._audio.terminate()
+            self._porcupine.delete()
             print("Audio stream closed.")
 
     def stop(self):
@@ -515,6 +522,12 @@ class AudioStorage:
         """Convert milliseconds to seconds."""
         return millis / 1000.0
 
+    def reset(self):
+        """Reset the audio storage."""
+        with self._audio_cache_lock:
+            self._chunks = []
+            self._total_duration = 0.0
+
     def __iter__(self):
         """Iterate over chunks."""
         for chunk in self._chunks:
@@ -680,7 +693,7 @@ class WhisperCore:
         # just check last segment for updates + etc -- detection algo
         if (
             self._last_activity[1] is not None
-            and self._last_activity[1].text != results[-1].text
+            and self._last_activity[1] != results[-1].text
         ):
             # update last activity
             self._last_activity[0] = time.time()
@@ -770,17 +783,22 @@ class WhisperCore:
 
         return list(results)
 
-    def reset_stream(self) -> WhisperCoreSave:
+    def reset_stream(self, save: bool = False) -> WhisperCoreSave:
         """Reset the transcription stream."""
-        instance = WhisperCoreSave(
-            self._audio_storage,
-            self._results_container,
-        )
+        instance = None
+        if save:
+            instance = WhisperCoreSave(
+                self._audio_storage,
+                self._results_container,
+            )
+
+        # clear the results container and audio storage
         with self._results_container_lock:
             # reset the results container
             self._results_container.clear()
             # reset the audio storage
-            self._audio_storage = AudioStorage(self._audio_storage._audio_config)
+            self._audio_storage.reset()
+
         # reset the last activity
         self._last_activity = [time.time(), None]
 
@@ -810,13 +828,12 @@ class WhisperCore:
         Returns:
             bool: True if there has been phrase activity within the timeout period
         """
+        # If we're just starting (no text yet), give more time
+        # if self._last_activity[1] is None:
+        #     return True  # Always return true immediately after reset
 
-        # Calculate time since last activity
+        # Normal timing check
         time_since_activity = time.time() - self._last_activity[0]
-
-        print(self._last_activity, time_since_activity, timeout)
-
-        # Return true if activity is recent (less than timeout)
         return time_since_activity < timeout
 
 
@@ -881,7 +898,7 @@ def run_whisper_core(
 
     # start printing out mic audio
     UPDATE_INTERVAL = 0.25
-    WHISPERCORE_INACTIVITY_TIMEOUT = 10.0  # seconds
+    WHISPERCORE_INACTIVITY_TIMEOUT = 3.0  # seconds
 
     SAMPLE_RATE = 16000  # samples per sec
     CHUNK_SIZE = 1024 * 4  # samples per chunk
@@ -995,7 +1012,7 @@ def run_whisper_core(
             print()
             # print out audio storage stats
             total_duration = audio_storage.get_total_duration_seconds()
-            # print(f"Audio storage total duration: {total_duration:.2f} seconds")
+            print(f"Audio storage total duration: {total_duration:.2f} seconds")
 
             # iterate over each audio chunk stored in audio_storage
             # for i, chunk in enumerate(audio_storage):
