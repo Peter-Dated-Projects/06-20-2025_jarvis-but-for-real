@@ -1,3 +1,4 @@
+import time
 import flask_cors
 from flask import Flask, request, jsonify, Blueprint, redirect, url_for
 from flask_socketio import SocketIO, emit
@@ -12,10 +13,20 @@ import threading
 sys.path.append(os.path.join(os.path.dirname(__file__), 'mcp_function', 'client'))
 from mcp_function.client.client import MCPClient
 
-from backend import SocketIOInstance, AudioBuffersInstance
+from backend import SocketIOInstance, ClientHandlerObject
 
 from api.stt import stt_bp
-from api.streaming import streaming_bp
+from api.clienthandler import client_bp
+from api.whispercorehandler import whisper_core_bp
+
+import threading
+
+import os
+import dotenv
+
+from source import whispercore_main, sesame_main
+
+# ---------------------------------------------------------------------------- #
 
 # load environment variables
 dotenv.load_dotenv("../.env")
@@ -72,7 +83,8 @@ if __name__ == "__main__":
     with app.app_context():
         # register blue prints
         app.register_blueprint(stt_bp, url_prefix="/stt")
-        app.register_blueprint(streaming_bp, url_prefix="/streaming")
+        app.register_blueprint(client_bp, url_prefix="/client")
+        app.register_blueprint(whisper_core_bp, url_prefix="/whispercore")
 
         # -------------------------------------------------- #
         # register custom objects
@@ -251,18 +263,53 @@ if __name__ == "__main__":
     # Run App
     # ----------------------------------------------------------------------------- #
 
+    GLOBAL_ARGS = {
+        # mic
+        "enable_mic": True,
+        "mic_mutex": threading.RLock(),
+        # whispercore
+        "enable_whispercore": True,
+        "whispercore_mutex": threading.RLock(),
+        # wake word
+        "wake_word_detected": False,
+        "wake_word_mutex": threading.RLock(),
+        # ---
+        # ---
+        # for thread -- disables duplicates
+        "threads_active": False,
+        "threads_controller_mutex": threading.RLock(),
+    }
+
+    # ------------------------------------------------------------------- #
+    # take over the threads controller mutex first
+    GLOBAL_ARGS["threads_controller_mutex"].acquire()
+
+    whispercore_thread = threading.Thread(
+        target=whispercore_main.run_whisper_core,
+        args=(GLOBAL_ARGS,),
+        daemon=True,
+    )
+    whispercore_thread.start()
+
     socket_io_instance = SocketIOInstance.get_instance()
 
     print(
         f"Starting {app.config['NAME']} v{app.config['VERSION']} on {os.getenv('BACKEND_HOST', 'localhost')}:{os.getenv('BACKEND_PORT', 5000)}"
     )
 
+    # enable threads
+    GLOBAL_ARGS["threads_active"] = True
+    GLOBAL_ARGS["threads_controller_mutex"].release()
+
+    # ------------------------------------------------------------------- #
+    # create socket app
+
     socket_io_instance.init_app(app)
     socket_io_instance.run(
         app,
         host=os.getenv("BACKEND_HOST", "localhost"),
-        port=os.getenv("BACKEND_PORT", 5000),
-        debug=os.getenv("DEBUG", True),
-        use_reloader=False,
+        port=int(os.getenv("BACKEND_PORT", 5001)),  # Ensure port is an integer
+        debug=False,
+        allow_unsafe_werkzeug=True,  # Add this line
     )
 
