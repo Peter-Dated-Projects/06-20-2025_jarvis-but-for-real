@@ -7,6 +7,7 @@ from backend import SocketIOInstance, ClientHandlerObject, SoftwareHandlerObject
 
 from api.stt import stt_bp
 from api.streaming import streaming_bp
+from api.whispercorehandler import whisper_core_bp
 
 import threading
 
@@ -48,6 +49,7 @@ if __name__ == "__main__":
         # register blue prints
         app.register_blueprint(stt_bp, url_prefix="/stt")
         app.register_blueprint(streaming_bp, url_prefix="/streaming")
+        app.register_blueprint(whisper_core_bp, url_prefix="/whispercore")
 
         # -------------------------------------------------- #
         # register custom objects

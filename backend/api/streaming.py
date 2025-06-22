@@ -87,11 +87,6 @@ def handle_setup_connect(data):
         namespace="/streaming",
     )
 
-    # wait a 5 seconds
-    import time
-
-    time.sleep(5)
-
     # end the connection
     print("[END CONNECTION] Audio Streaming:", request.sid)
     emit(
