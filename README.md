@@ -1,10 +1,8 @@
-# 06-20-2025_jarvis-but-for-real
-
-mega cool project. we cooked fr fr.
+# S.O.N.A.
+## Semantic Operational & Natural Assistant
+mega cool project. we cooked fr fr. lowkey was like talking about how siri is poo so we built something that is better and can be integrated natively into systems, triggered by vocal commands.
 
 # Project Setup Guide
-
-Welcome to the Speech-To-Text Hackathon Project! This guide will help you get the project running on your machine.
 
 ## Prerequisites
 
