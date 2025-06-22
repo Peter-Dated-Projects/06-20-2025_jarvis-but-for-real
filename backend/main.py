@@ -1,16 +1,20 @@
 import flask_cors
 from flask import Flask, request, jsonify, Blueprint, redirect, url_for
 from flask_socketio import SocketIO, emit
+import asyncio
+import sys
+import os
+import dotenv
+import atexit
+from mcp.client.client import MCPClient
+
+# Add the MCP client directory to the Python path
+sys.path.append(os.path.join(os.path.dirname(__file__), 'mcp', 'client'))
 
 from backend import SocketIOInstance, AudioBuffersInstance
 
 from api.stt import stt_bp
 from api.streaming import streaming_bp
-
-import os
-import dotenv
-
-# ---------------------------------------------------------------------------- #
 
 # load environment variables
 dotenv.load_dotenv("../.env")
@@ -30,6 +34,23 @@ def create_app():
     flask_cors.CORS(app, resources={r"/*": {"origins": "*"}})
     return app
 
+async def setup_mcp(app):
+    """Initialize MCP client and attach to app."""
+    app.mcp_client = MCPClient()
+    await app.mcp_client.connect_to_servers()
+
+
+def cleanup_on_shutdown(app):
+    """Cleanup MCP client on shutdown."""
+    if hasattr(app, 'mcp_client'):
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(app.mcp_client.cleanup())
+        except Exception as e:
+            print(f"Cleanup error: {e}")
+        finally:
+            loop.close()
 
 # --------------------------------------------------------------------------- #
 # Register blueprints + objects
@@ -103,6 +124,12 @@ if __name__ == "__main__":
             #     app.config["WHISPER_MODELS_DIR"], "ggml-large-v2.bin"
             # )
         }
+        
+        # loop = asyncio.get_event_loop()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(setup_mcp(app))
+        atexit.register(lambda: cleanup_on_shutdown(app))
 
     # --------------------------------------------------------------------------- #
     # Routes
@@ -167,6 +194,52 @@ if __name__ == "__main__":
               </body>
             </html>
         """
+        
+    @app.route("/query", methods=["POST"])
+    def query():
+        user_input = request.json.get("query")
+        if not user_input:
+            return jsonify({"error": "Missing query parameter."}), 400
+
+        # Check if MCP client is available
+        if MCPClient is None:
+            return jsonify({"error": "MCP client not available. Please check dependencies."}), 500
+
+        try:
+            # Create new event loop for this request
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            llm_output = loop.run_until_complete(app.mcp_client.process_query(user_input))
+            
+            return jsonify({"response": llm_output})
+            
+        except Exception as e:
+            return jsonify({"error": f"Error processing query: {str(e)}"}), 500
+        finally:
+            # Clean up the event loop
+            try:
+                loop.close()
+            except:
+                pass
+
+    @app.route("/cleanup", methods=["POST"])
+    def cleanup_mcp():
+        """Cleanup MCP client connections."""
+        if hasattr(app, 'mcp_client'):
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(app.mcp_client.cleanup())
+                delattr(app, 'mcp_client')
+                return jsonify({"status": "success", "message": "MCP client cleaned up successfully"})
+            except Exception as e:
+                return jsonify({"error": f"Error during cleanup: {str(e)}"}), 500
+            finally:
+                try:
+                    loop.close()
+                except:
+                    pass
+        return jsonify({"status": "success", "message": "No MCP client to cleanup"})
 
     # ----------------------------------------------------------------------------- #
     # Run App
@@ -185,3 +258,4 @@ if __name__ == "__main__":
         port=os.getenv("BACKEND_PORT", 5001),
         debug=os.getenv("DEBUG", True),
     )
+
