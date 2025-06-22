@@ -5,7 +5,7 @@ from flask import current_app as app
 from backend import (
     SocketIOInstance,
     ClientHandlerObject,
-    SoftwareHandlerObject,
+    WhisperCoreHandlerObject,
 )
 
 import os
@@ -74,7 +74,7 @@ def handle_setup_connect(data):
 
     # check sender
     if sender == "software":
-        SoftwareHandlerObject.get_instance().streaming_id = request.sid
+        WhisperCoreHandlerObject.get_instance().streaming_id = request.sid
         print("Software connected for audio streaming.")
     elif sender == "client":
         ClientHandlerObject.get_instance().streaming_id = request.sid
