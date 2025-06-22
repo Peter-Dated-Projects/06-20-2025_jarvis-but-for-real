@@ -1,15 +1,21 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useReducer } from "react";
 import io, { Socket } from "socket.io-client";
 import styles from "./page.module.css";
 
 // ----------------------------------------------------------------- //
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
+const BACKEND_URL = "http://localhost:5001";
 
 // ----------------------------------------------------------------- //
 interface TranscriptionSegment {
+  transcription: string;
+  start_time: number;
+  end_time: number;
+}
+
+interface TranscriptionSegmentCardProps {
   text: string;
   start: number;
   end: number;
@@ -17,12 +23,12 @@ interface TranscriptionSegment {
 
 // ----------------------------------------------------------------- //
 
-function TranscriptionSegmentCard({ text, start, end }: TranscriptionSegment) {
+function TranscriptionSegmentCard({ text, start, end }: TranscriptionSegmentCardProps) {
   return (
     <div className={styles.transcriptionSegmentCard}>
-      <p className={styles.transcriptionSegmentText}>{text}</p>
+      <p className={styles.transcriptionSegmentText}>Text: {text}</p>
       <p className={styles.transcriptionSegmentTime}>
-        {start} - {end}
+        Start: {start} - End: {end}
       </p>
     </div>
   );
@@ -43,26 +49,24 @@ export default function Home() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [socketId, setSocketId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<string>("disconnected");
 
   // Added back for real-time transcription
-  const [transcriptionSegments, setTranscriptionSegments] = useState<TranscriptionSegment[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<string>("disconnected");
+  const [transcriptionSegments, setTranscriptionSegments] = useState<
+    TranscriptionSegmentCardProps[]
+  >([]);
 
   // ----------------------------------------------------------------- //
   // Effect to handle socket connection and events
 
   useEffect(() => {
     console.log("Creating first object to test");
+
     setTranscriptionSegments([
       {
         text: "This is a test transcription segment.",
         start: 0,
         end: 5,
-      },
-      {
-        text: "ADL WAHDLWAH",
-        start: 5,
-        end: 23,
       },
     ]);
 
@@ -99,26 +103,29 @@ export default function Home() {
     // segment update event
     propagateSocket.on("segment_update", (data: TranscriptionSegment) => {
       console.log("Segment update received:", data);
-      setTranscriptionSegments((prevSegments) => [
-        ...prevSegments,
-        {
-          text: data.text,
-          start: data.start,
-          end: data.end, // Ensure end time is included
-        },
-      ]);
+
+      // Update the last segment if it matches the start time, else ignore
+      setTranscriptionSegments((prevSegments) => {
+        if (prevSegments.length === 0) return prevSegments;
+        const lastIndex = prevSegments.length - 1;
+        // Update the last segment
+        const updatedSegments = [...prevSegments];
+        updatedSegments[lastIndex] = {
+          text: data.transcription,
+          start: data.start_time,
+          end: data.end_time,
+        };
+        return updatedSegments;
+      });
     });
 
     // segment creation event
     propagateSocket.on("segment_creation", (data: TranscriptionSegment) => {
       console.log("Segment creation event received:", data);
+      // Add new segment to the list
       setTranscriptionSegments((prevSegments) => [
         ...prevSegments,
-        {
-          text: data.text,
-          start: data.start,
-          end: data.end, // Ensure end time is included
-        },
+        { text: data.transcription, start: data.start_time, end: data.end_time },
       ]);
     });
 
@@ -156,6 +163,11 @@ export default function Home() {
     }
   };
 
+  // Add this log to see changes to the state
+  useEffect(() => {
+    console.log("Transcription segments updated:", transcriptionSegments);
+  }, [transcriptionSegments]);
+
   return (
     <div className={styles.page}>
       <main className={styles.main}>
@@ -174,14 +186,14 @@ export default function Home() {
         {/* Added back real-time transcription display */}
         {transcriptionSegments && (
           <div className={styles.transcriptionSection}>
-            <h2>Real-time Transcription:</h2>
+            <h2>Real-Time Transcription:</h2>
             <div className={styles.transcriptionText}>
-              {transcriptionSegments.map((segment) => (
+              {transcriptionSegments.map((segment, index) => (
                 <TranscriptionSegmentCard
-                  key={segment.start}
+                  key={index} // Include the counter in the key
+                  text={segment.text}
                   start={segment.start}
                   end={segment.end}
-                  text={segment.text}
                 />
               ))}
             </div>
