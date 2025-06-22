@@ -5,11 +5,12 @@ This document describes the integration of MCP (Model Context Protocol) function
 ## Overview
 
 The MCP integration allows the Flask application to:
-- Connect to various MCP servers (Google Workspace, Spotify, Terminal)
-- Process natural language queries using Gemini AI
-- Execute tools and functions through MCP servers
-- Maintain conversation history
-- Generate audio responses using text-to-speech
+
+-   Connect to various MCP servers (Google Workspace, Spotify, Terminal)
+-   Process natural language queries using Gemini AI
+-   Execute tools and functions through MCP servers
+-   Maintain conversation history
+-   Generate audio responses using text-to-speech
 
 ## Architecture
 
@@ -42,7 +43,7 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret
 
 # Flask App
 BACKEND_HOST=localhost
-BACKEND_PORT=5001
+BACKEND_PORT=5000
 DEBUG=True
 ```
 
@@ -56,15 +57,17 @@ pip install -r requirements.txt
 ### 3. Docker Setup (for Google Workspace MCP)
 
 The Google Workspace MCP server runs in Docker. Make sure you have:
-- Docker installed and running
-- Google Workspace MCP image built or pulled
+
+-   Docker installed and running
+-   Google Workspace MCP image built or pulled
 
 ### 4. MCP Server Setup
 
 Ensure the MCP servers are available:
-- `backend/mcp/server/spotify-server.py`
-- `backend/mcp/server/terminal-server.py`
-- Google Workspace MCP Docker container
+
+-   `backend/mcp/server/spotify-server.py`
+-   `backend/mcp/server/terminal-server.py`
+-   Google Workspace MCP Docker container
 
 ## API Endpoints
 
@@ -73,16 +76,18 @@ Ensure the MCP servers are available:
 Process a natural language query using MCP tools.
 
 **Request:**
+
 ```json
 {
-    "query": "What's the weather like today?"
+	"query": "What's the weather like today?"
 }
 ```
 
 **Response:**
+
 ```json
 {
-    "response": "Based on the current weather data..."
+	"response": "Based on the current weather data..."
 }
 ```
 
@@ -91,10 +96,11 @@ Process a natural language query using MCP tools.
 Clean up MCP client connections.
 
 **Response:**
+
 ```json
 {
-    "status": "success",
-    "message": "MCP client cleaned up successfully"
+	"status": "success",
+	"message": "MCP client cleaned up successfully"
 }
 ```
 
@@ -103,7 +109,7 @@ Clean up MCP client connections.
 ### 1. Basic Query
 
 ```bash
-curl -X POST http://localhost:5001/query \
+curl -X POST http://localhost:5000/query \
   -H "Content-Type: application/json" \
   -d '{"query": "What time is it?"}'
 ```
@@ -114,7 +120,7 @@ curl -X POST http://localhost:5001/query \
 import requests
 
 response = requests.post(
-    "http://localhost:5001/query",
+    "http://localhost:5000/query",
     json={"query": "Can you help me create a new document?"}
 )
 
@@ -133,24 +139,28 @@ python test_mcp_integration.py
 ## Features
 
 ### Conversation History
-- Maintains conversation context across multiple queries
-- Configurable history length (default: 4 interactions)
-- Includes previous Q&A pairs in prompts
+
+-   Maintains conversation context across multiple queries
+-   Configurable history length (default: 4 interactions)
+-   Includes previous Q&A pairs in prompts
 
 ### Multi-Step Reasoning
-- Supports up to 3 iterations of tool calls
-- Handles complex queries requiring multiple tools
-- Provides detailed error messages and tracebacks
+
+-   Supports up to 3 iterations of tool calls
+-   Handles complex queries requiring multiple tools
+-   Provides detailed error messages and tracebacks
 
 ### Tool Integration
-- **Google Workspace**: Document creation, email, calendar
-- **Spotify**: Music playback, playlist management
-- **Terminal**: System commands and file operations
+
+-   **Google Workspace**: Document creation, email, calendar
+-   **Spotify**: Music playback, playlist management
+-   **Terminal**: System commands and file operations
 
 ### Audio Generation
-- Text-to-speech using Kokoro pipeline
-- Supports multiple voices
-- Saves audio segments as WAV files
+
+-   Text-to-speech using Kokoro pipeline
+-   Supports multiple voices
+-   Saves audio segments as WAV files
 
 ## Error Handling
 
@@ -184,30 +194,33 @@ server_configs = {
 
 Environment variables for Flask app:
 
-- `BACKEND_HOST`: Server host (default: localhost)
-- `BACKEND_PORT`: Server port (default: 5001)
-- `DEBUG`: Debug mode (default: True)
+-   `BACKEND_HOST`: Server host (default: localhost)
+-   `BACKEND_PORT`: Server port (default: 5000)
+-   `DEBUG`: Debug mode (default: True)
 
 ## Troubleshooting
 
 ### Common Issues
 
 1. **Import Errors**
-   - Ensure all dependencies are installed: `pip install -r requirements.txt`
-   - Check Python path includes MCP client directory
+
+    - Ensure all dependencies are installed: `pip install -r requirements.txt`
+    - Check Python path includes MCP client directory
 
 2. **Connection Errors**
-   - Verify MCP servers are running
-   - Check Docker is running (for Google Workspace MCP)
-   - Ensure environment variables are set correctly
+
+    - Verify MCP servers are running
+    - Check Docker is running (for Google Workspace MCP)
+    - Ensure environment variables are set correctly
 
 3. **Timeout Errors**
-   - First-time setup may take longer due to model downloads
-   - Increase timeout values for slow operations
+
+    - First-time setup may take longer due to model downloads
+    - Increase timeout values for slow operations
 
 4. **Authentication Errors**
-   - Verify API keys and credentials are correct
-   - Check Google Workspace OAuth setup
+    - Verify API keys and credentials are correct
+    - Check Google Workspace OAuth setup
 
 ### Debug Mode
 
@@ -227,9 +240,9 @@ python main.py
 
 ## Performance
 
-- **Caching**: MCP client maintains connections for better performance
-- **Async Operations**: Non-blocking async operations for better responsiveness
-- **Resource Management**: Proper cleanup of connections and event loops
+-   **Caching**: MCP client maintains connections for better performance
+-   **Async Operations**: Non-blocking async operations for better responsiveness
+-   **Resource Management**: Proper cleanup of connections and event loops
 
 ## Future Enhancements
 
@@ -237,4 +250,4 @@ python main.py
 2. **WebSocket Integration**: Real-time communication
 3. **Streaming Responses**: Stream responses for better UX
 4. **Advanced Audio**: More audio formats and voice options
-5. **Caching Layer**: Redis-based caching for responses 
+5. **Caching Layer**: Redis-based caching for responses

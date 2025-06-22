@@ -25,9 +25,9 @@ class MCPClient:
         self.history_length = history_length
         self.conversation_history = []
         self.pipeline = KPipeline(lang_code='a')
-        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        gemini_api_key = os.getenv("GEMINI_API")
         if not gemini_api_key:
-            raise ValueError("GEMINI_API_KEY not found. Please add it to your .env file.")
+            raise ValueError("GEMINI_API not found. Please add it to your .env file.")
         self.genai_client = genai.Client(api_key=gemini_api_key)
         
     def add_to_history(self, query: str, response: str):

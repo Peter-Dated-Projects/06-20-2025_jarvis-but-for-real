@@ -254,14 +254,14 @@ if __name__ == "__main__":
     socket_io_instance = SocketIOInstance.get_instance()
 
     print(
-        f"Starting {app.config['NAME']} v{app.config['VERSION']} on {os.getenv('BACKEND_HOST', 'localhost')}:{os.getenv('BACKEND_PORT', 5001)}"
+        f"Starting {app.config['NAME']} v{app.config['VERSION']} on {os.getenv('BACKEND_HOST', 'localhost')}:{os.getenv('BACKEND_PORT', 5000)}"
     )
 
     socket_io_instance.init_app(app)
     socket_io_instance.run(
         app,
         host=os.getenv("BACKEND_HOST", "localhost"),
-        port=os.getenv("BACKEND_PORT", 5001),
+        port=os.getenv("BACKEND_PORT", 5000),
         debug=os.getenv("DEBUG", True),
         use_reloader=False,
     )
