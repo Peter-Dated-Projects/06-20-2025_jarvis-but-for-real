@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 
 from flask import current_app as app
+import requests
 from backend import (
     SocketIOInstance,
     ClientHandlerObject,
@@ -153,8 +154,20 @@ def handle_session_completion():
 
     print(f"[SESSION COMPLETION] Received session completion event: {data}")
     # print out all text segments
+    command_gemini = ""
     if "messages" in data:
         for message in data["messages"]:
+            command_gemini += f"{message}"
             print(f"Segment: {message}")
+
+    if command_gemini:
+        try:
+            response = requests.post(
+                "http://localhost:5001/query",
+                json={"query": command_gemini}
+            )
+        except requests.exceptions.RequestException as e:
+            app.logger.error(f"Error sending request to /query: {e}")
+            return jsonify({"error": "Failed to send request to /query"}), 500
 
     return jsonify({"status": "success"}), 200

@@ -294,7 +294,7 @@ if __name__ == "__main__":
     socket_io_instance = SocketIOInstance.get_instance()
 
     print(
-        f"Starting {app.config['NAME']} v{app.config['VERSION']} on {os.getenv('BACKEND_HOST', 'localhost')}:{os.getenv('BACKEND_PORT', 5000)}"
+        f"Starting {app.config['NAME']} v{app.config['VERSION']} on {os.getenv('BACKEND_HOST', 'localhost')}:{os.getenv('BACKEND_PORT', 5001)}"
     )
 
     # enable threads

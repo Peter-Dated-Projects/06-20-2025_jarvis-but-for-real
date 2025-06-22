@@ -90,6 +90,7 @@ class MCPClient:
             },
             "spotify": {"command": "python3", "args": [os.path.join(server_dir, "spotify-server.py")]},
             "terminal": {"command": "python3", "args": [os.path.join(server_dir, "terminal-server.py")]},
+            "system": {"command": "python3", "args": [os.path.join(server_dir, "system-server.py")]},
         }
 
         all_tools = []

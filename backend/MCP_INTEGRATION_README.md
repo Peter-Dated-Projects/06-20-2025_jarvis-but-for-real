@@ -43,7 +43,7 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret
 
 # Flask App
 BACKEND_HOST=localhost
-BACKEND_PORT=5000
+BACKEND_PORT=5001
 DEBUG=True
 ```
 
@@ -109,7 +109,7 @@ Clean up MCP client connections.
 ### 1. Basic Query
 
 ```bash
-curl -X POST http://localhost:5000/query \
+curl -X POST http://localhost:5001/query \
   -H "Content-Type: application/json" \
   -d '{"query": "What time is it?"}'
 ```
@@ -120,7 +120,7 @@ curl -X POST http://localhost:5000/query \
 import requests
 
 response = requests.post(
-    "http://localhost:5000/query",
+    "http://localhost:5001/query",
     json={"query": "Can you help me create a new document?"}
 )
 
@@ -195,7 +195,7 @@ server_configs = {
 Environment variables for Flask app:
 
 -   `BACKEND_HOST`: Server host (default: localhost)
--   `BACKEND_PORT`: Server port (default: 5000)
+-   `BACKEND_PORT`: Server port (default: 5001)
 -   `DEBUG`: Debug mode (default: True)
 
 ## Troubleshooting
