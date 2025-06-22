@@ -76,17 +76,20 @@ class MCPClient:
             "google-workspace-mcp:local"
         ]
 
+        # Get the absolute path to the server scripts
+        server_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'server'))
+
         server_configs = {
             "googletool": {
-                "command": "docker", 
+                "command": "docker",
                 "args": docker_args,
                 "env": {
                     "GOOGLE_CLIENT_ID": google_client_id,
                     "GOOGLE_CLIENT_SECRET": google_client_secret,
                 }
             },
-            "spotify": {"command": "python3", "args": ["../server/spotify-server.py"]},
-            "terminal": {"command": "python3", "args": ["../server/terminal-server.py"]},
+            "spotify": {"command": "python3", "args": [os.path.join(server_dir, "spotify-server.py")]},
+            "terminal": {"command": "python3", "args": [os.path.join(server_dir, "terminal-server.py")]},
         }
 
         all_tools = []

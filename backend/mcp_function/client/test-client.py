@@ -3,7 +3,7 @@ import os
 import sys
 from typing import Optional
 from contextlib import AsyncExitStack
-from mcp import ClientSession, StdioServerParameters
+from mcp_function import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from google import genai
 from google.genai import types
