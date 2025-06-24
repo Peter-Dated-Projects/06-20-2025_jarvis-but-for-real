@@ -36,6 +36,17 @@ Create a [`.env`](.env) file in the project root directory with the following co
 ```env
 # .env file for backend
 
+PVPORCUPINE_API=
+GEMINI_API=
+WHISPER_MODEL_FILE="assets/models/ggml-medium.en.bin"
+NEXT_PUBLIC_BACKEND_PORT=
+NEXT_PUBLIC_BACKEND_URL=
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+SPOTIFY_REDIRECT_URI=https://localhost:8080/callback
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
 HOST=localhost
 PORT=5001
 
@@ -53,7 +64,23 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ### 2. Install Dependencies
 
 ```bash
+cd backend
 pip install -r requirements.txt
+```
+
+### 3. Running Locally
+
+## Backend
+```bash
+cd backend
+python main.py
+```
+
+## Frontend
+```bash
+cd frontend
+npm i
+npm run dev
 ```
 
 ## API Endpoints
